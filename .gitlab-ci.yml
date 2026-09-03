@@ -1,0 +1,365 @@
+workflow:
+  rules:
+    - if: >-
+        $CI_COMMIT_TAG =~
+        /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/ &&
+        $CI_COMMIT_REF_PROTECTED == "true"
+    - if: '$CI_COMMIT_TAG'
+      when: never
+    - if: '$CI_PIPELINE_SOURCE == "external_pull_request_event"'
+    - if: '$CI_COMMIT_BRANCH && $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH'
+    - if: >-
+        $CI_PIPELINE_SOURCE == "push" &&
+        $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH &&
+        $CI_COMMIT_REF_PROTECTED == "true"
+    - when: never
+
+stages:
+  - lint
+  - test
+  - stage
+  - manifest
+  - resolve
+  - scan
+  - publish
+
+variables:
+  CI_JOB_IMAGE: >-
+    registry.ddbuild.io/docker:29.4.0-noble@sha256:3d4a9fb50befc45c91e5fd7d6ffad0df5f926506739f4ebd2537e95abaeacd52
+  CI_SCANNER_IMAGE: >-
+    registry.ddbuild.io/ci/images:1.2.13@sha256:ea0fcfc284d0021960a409755bef5f97559797355344a5e04a5670a256b76e0d
+  DD_PKG_IMAGE: 'registry.ddbuild.io/agent-delivery/dd-pkg:v0.9.3'
+  GRADLE_ARGS: '--no-daemon'
+  GRADLE_USER_HOME: '$CI_PROJECT_DIR/.gradle-home'
+  IMAGE_MIRROR: 'registry.ddbuild.io/images/mirror'
+  SOURCE_IMAGE: >-
+    registry.ddbuild.io/ci/musl-toolchain-glibc-support/musl-build-env
+
+.validation-rules:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "external_pull_request_event"'
+    - if: '$CI_COMMIT_BRANCH && $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH'
+    - when: never
+
+.main-rules:
+  rules:
+    - if: >-
+        $CI_PIPELINE_SOURCE == "push" &&
+        $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH &&
+        $CI_COMMIT_REF_PROTECTED == "true"
+      interruptible: false
+    - when: never
+
+.release-rules:
+  rules:
+    - if: >-
+        $CI_COMMIT_TAG =~
+        /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/ &&
+        $CI_COMMIT_REF_PROTECTED == "true"
+      interruptible: false
+    - when: never
+
+.docker-java-job:
+  image: '$CI_JOB_IMAGE'
+  interruptible: true
+  before_script:
+    - |
+      set -euo pipefail
+      apt-get update
+      DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        'make' \
+        'openjdk-17-jre-headless'
+      rm -rf /var/lib/apt/lists/*
+      docker --version
+      docker buildx version
+      java -version
+  variables:
+    KUBERNETES_CPU_REQUEST: '8'
+    KUBERNETES_MEMORY_REQUEST: '24Gi'
+    KUBERNETES_MEMORY_LIMIT: '30Gi'
+
+.platform-build-and-test:
+  extends: .docker-java-job
+  tags:
+    - 'docker-in-docker:$ARCH'
+  timeout: 3h
+  variables:
+    DOCKER_LOOPBACK_SIZE: '60G'
+    DOCKER_LOOPBACK_PATH: '/var'
+  parallel:
+    matrix:
+      - ARCH:
+          - amd64
+          - arm64
+  script:
+    - &platform-build-and-test |
+      set -euo pipefail
+      source_image="${SOURCE_IMAGE}:${CI_COMMIT_SHA}-${ARCH}"
+      php_image="php-buildonly:${CI_COMMIT_SHA}-${ARCH}"
+
+      case "${ARCH}" in
+        amd64)
+          musl_image_variable='MUSL_BUILD_ENV_AMD64_IMAGE'
+          php_image_variable='PHP_BUILDONLY_AMD64_IMAGE'
+          ;;
+        arm64)
+          musl_image_variable='MUSL_BUILD_ENV_ARM64_IMAGE'
+          php_image_variable='PHP_BUILDONLY_ARM64_IMAGE'
+          ;;
+        *)
+          echo "Unsupported CI architecture: ${ARCH}" >&2
+          exit 1
+          ;;
+      esac
+
+      make "test-${ARCH}" \
+        "${musl_image_variable}=${source_image}" \
+        "${php_image_variable}=${php_image}"
+
+lint:
+  extends: .docker-java-job
+  stage: lint
+  tags:
+    - 'arch:amd64'
+  rules:
+    - if: '$CI_COMMIT_TAG'
+      when: never
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+      interruptible: false
+    - when: on_success
+  variables:
+    KUBERNETES_CPU_REQUEST: '4'
+    KUBERNETES_MEMORY_REQUEST: '8Gi'
+    KUBERNETES_MEMORY_LIMIT: '12Gi'
+  script:
+    - make lint
+
+test:
+  extends:
+    - .platform-build-and-test
+    - .validation-rules
+  stage: test
+
+stage-platform:
+  extends:
+    - .platform-build-and-test
+    - .main-rules
+  stage: stage
+  variables:
+    KUBERNETES_SERVICE_ACCOUNT_OVERWRITE: musl-toolchain-glibc-support
+  script:
+    - *platform-build-and-test
+    - |
+      set -euo pipefail
+      command -v docker-credential-ci
+
+      source_image="${SOURCE_IMAGE}:${CI_COMMIT_SHA}-${ARCH}"
+      docker push "${source_image}"
+      digest=$(docker buildx imagetools inspect "${source_image}" \
+        --format '{{.Manifest.Digest}}')
+      printf 'Pushed %s@%s\n' "${source_image}" "${digest}"
+
+manifest:
+  extends: .main-rules
+  stage: manifest
+  image: '$CI_JOB_IMAGE'
+  tags:
+    - 'arch:amd64'
+  id_tokens:
+    DDSIGN_ID_TOKEN:
+      aud: image-integrity
+  needs:
+    - stage-platform
+  variables:
+    KUBERNETES_SERVICE_ACCOUNT_OVERWRITE: musl-toolchain-glibc-support
+    KUBERNETES_CPU_REQUEST: '2'
+    KUBERNETES_MEMORY_REQUEST: '4Gi'
+    KUBERNETES_MEMORY_LIMIT: '6Gi'
+  script:
+    - |
+      set -euo pipefail
+      command -v docker-credential-ci
+
+      amd64_image="${SOURCE_IMAGE}:${CI_COMMIT_SHA}-amd64"
+      arm64_image="${SOURCE_IMAGE}:${CI_COMMIT_SHA}-arm64"
+      index_image="${SOURCE_IMAGE}:${CI_COMMIT_SHA}"
+      metadata_file=$(mktemp)
+      inspect_file=$(mktemp)
+      trap 'rm -f "${metadata_file}" "${inspect_file}"' EXIT
+
+      docker buildx imagetools create \
+        --metadata-file "${metadata_file}" \
+        --tag "${index_image}" \
+        "${amd64_image}" \
+        "${arm64_image}"
+      docker buildx imagetools inspect "${index_image}" \
+        --format '{{json .Manifest}}' > "${inspect_file}"
+
+      jq -e '
+        (.manifests | length) == 2 and
+        ([.manifests[].platform | [.os, .architecture]] | sort) ==
+          [["linux", "amd64"], ["linux", "arm64"]]
+      ' "${inspect_file}"
+
+      digest=$(jq -er '
+        .["containerimage.digest"] //
+        .["containerimage.descriptor"].digest
+      ' "${metadata_file}")
+      inspected_digest=$(jq -er '.digest' "${inspect_file}")
+      test "${digest}" = "${inspected_digest}"
+
+      ddsign sign "${index_image}" \
+        --docker-metadata-file "${metadata_file}"
+      printf 'Internal source index: %s@%s\n' "${SOURCE_IMAGE}" "${digest}"
+
+resolve-release:
+  extends: .release-rules
+  stage: resolve
+  image: '$CI_JOB_IMAGE'
+  tags:
+    - 'arch:amd64'
+  variables:
+    KUBERNETES_SERVICE_ACCOUNT_OVERWRITE: musl-toolchain-glibc-support
+    KUBERNETES_CPU_REQUEST: '1'
+    KUBERNETES_MEMORY_REQUEST: '2Gi'
+    KUBERNETES_MEMORY_LIMIT: '4Gi'
+  script:
+    - |
+      set -euo pipefail
+      command -v docker-credential-ci
+
+      source_tag="${SOURCE_IMAGE}:${CI_COMMIT_SHA}"
+      inspect_file=$(mktemp)
+      trap 'rm -f "${inspect_file}"' EXIT
+
+      docker buildx imagetools inspect "${source_tag}" \
+        --format '{{json .Manifest}}' > "${inspect_file}"
+      jq -e '
+        (.manifests | length) == 2 and
+        ([.manifests[].platform | [.os, .architecture]] | sort) ==
+          [["linux", "amd64"], ["linux", "arm64"]]
+      ' "${inspect_file}"
+
+      digest=$(jq -er '.digest' "${inspect_file}")
+      printf 'RELEASE_DIGEST=%s\n' "${digest}" > release.env
+      printf 'RELEASE_SOURCE=%s@%s\n' \
+        "${SOURCE_IMAGE}" "${digest}" >> release.env
+      printf 'Resolved release source: %s@%s\n' \
+        "${SOURCE_IMAGE}" "${digest}"
+  artifacts:
+    reports:
+      dotenv: release.env
+    expire_in: 1 day
+
+scan-release:
+  extends: .release-rules
+  stage: scan
+  image: '$CI_SCANNER_IMAGE'
+  tags:
+    - 'arch:amd64'
+  needs:
+    - job: resolve-release
+      artifacts: true
+  variables:
+    KUBERNETES_SERVICE_ACCOUNT_OVERWRITE: musl-toolchain-glibc-support
+    KUBERNETES_CPU_REQUEST: '2'
+    KUBERNETES_MEMORY_REQUEST: '4Gi'
+    KUBERNETES_MEMORY_LIMIT: '6Gi'
+  script:
+    - |
+      set -euo pipefail
+      scan_result=$(mktemp)
+      trap 'rm -f "${scan_result}"' EXIT
+
+      ddsign verify "${RELEASE_SOURCE}" --roles ci
+      imageinspector scan \
+        --target prod \
+        --registry registry.ddbuild.io \
+        --repository ci/musl-toolchain-glibc-support/musl-build-env \
+        --digest "${RELEASE_DIGEST}" \
+        --build-repository DataDog/musl-toolchain-glibc-support \
+        --build-definition-file musl-build-env/Dockerfile \
+        --build-pipeline-url "${CI_PIPELINE_URL}" > "${scan_result}"
+
+      test -s "${scan_result}"
+      if ! jq -e '
+        type == "object" and
+        has("should_block") and
+        (.should_block == false)
+      ' "${scan_result}" > /dev/null; then
+        echo 'imageinspector did not return an explicit non-blocking result' >&2
+        jq . "${scan_result}" || cat "${scan_result}"
+        exit 1
+      fi
+
+publish-release:
+  extends: .release-rules
+  stage: publish
+  image: '$DD_PKG_IMAGE'
+  tags:
+    - 'arch:arm64'
+  needs:
+    - job: resolve-release
+      artifacts: true
+    - job: scan-release
+      artifacts: false
+  resource_group: musl-build-env-publication
+  timeout: 75m
+  variables:
+    KUBERNETES_SERVICE_ACCOUNT_OVERWRITE: musl-toolchain-glibc-support
+    KUBERNETES_CPU_REQUEST: '1'
+    KUBERNETES_MEMORY_REQUEST: '2Gi'
+    KUBERNETES_MEMORY_LIMIT: '4Gi'
+    PUBLIC_IMAGES_PUBLISH_TIMEOUT: '1800'
+  script:
+    - |
+      set -euo pipefail
+      tag_response=$(mktemp)
+      trap 'rm -f "${tag_response}"' EXIT
+
+      status=$(
+        curl -sS --output "${tag_response}" \
+          --write-out '%{http_code}' \
+          "https://hub.docker.com/v2/repositories/datadog/musl-build-env/tags/${CI_COMMIT_TAG}"
+      )
+
+      case "${status}" in
+        200)
+          public_digest=$(
+            perl -MJSON::PP -0777 \
+              -ne 'print decode_json($_)->{"digest"}' "${tag_response}"
+          )
+          test -n "${public_digest}"
+          if [ "${public_digest}" != "${RELEASE_DIGEST}" ]; then
+            echo "Refusing to overwrite musl-build-env:${CI_COMMIT_TAG}" >&2
+            echo "Docker Hub digest: ${public_digest}" >&2
+            echo "Release digest:    ${RELEASE_DIGEST}" >&2
+            exit 1
+          fi
+          ;;
+        404)
+          ;;
+        *)
+          echo "Docker Hub preflight returned HTTP ${status}" >&2
+          cat "${tag_response}" >&2
+          exit 1
+          ;;
+      esac
+
+      dd-pkg version
+      dd-pkg publish-image \
+        --timeout "${PUBLIC_IMAGES_PUBLISH_TIMEOUT}" \
+        --poll-interval 30 \
+        --registries public \
+        --sources "${RELEASE_SOURCE}" \
+        --destinations "musl-build-env:${CI_COMMIT_TAG}" \
+        --merge-strategy none \
+        --signing=false
+
+      dd-pkg publish-image \
+        --timeout "${PUBLIC_IMAGES_PUBLISH_TIMEOUT}" \
+        --poll-interval 30 \
+        --registries public \
+        --tag-reference "musl-build-env:${CI_COMMIT_TAG}" \
+        --new-tags latest \
+        --signing=false

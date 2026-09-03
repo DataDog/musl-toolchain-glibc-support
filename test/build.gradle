@@ -1,0 +1,124 @@
+plugins {
+    id 'groovy'
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    testImplementation 'org.apache.groovy:groovy:4.0.30'
+    testImplementation 'org.spockframework:spock-core:2.4-groovy-4.0'
+    testImplementation platform('org.testcontainers:testcontainers-bom:2.0.5')
+    testImplementation 'org.testcontainers:testcontainers'
+    testImplementation 'org.testcontainers:testcontainers-spock'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    testRuntimeOnly 'org.slf4j:slf4j-simple:1.7.36'
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+dependencyLocking {
+    lockAllConfigurations()
+}
+
+def imageMirror = providers.environmentVariable('IMAGE_MIRROR').getOrElse('')
+def defaultImage = { String publicImage, String mirrorPath ->
+    imageMirror ? "${imageMirror}/${mirrorPath}" : publicImage
+}
+
+def defaultContainerImages = [
+    buildEnvImage: 'musl-build-env:latest',
+    glibcImage: defaultImage('ubuntu:26.04', 'ubuntu:26.04'),
+    muslImage: defaultImage('alpine:3.24', 'alpine:3.24'),
+]
+
+def defaultTestContainersImages = [
+    ryukImage: [
+        'ryuk.container.image',
+        defaultImage(
+            'testcontainers/ryuk:0.14.0',
+            'testcontainers/ryuk:0.14.0'),
+    ],
+    tinyImage: [
+        'tinyimage.container.image',
+        defaultImage('alpine:3.17', 'library/alpine:3.17.7'),
+    ],
+]
+
+tasks.withType(Test).configureEach {
+    useJUnitPlatform()
+    maxParallelForks = 1
+
+    if (providers.gradleProperty('excludeTests').isPresent()) {
+        exclude providers.gradleProperty('excludeTests').get()
+    }
+
+    defaultContainerImages.each { propertyName, defaultValue ->
+        systemProperty propertyName,
+            providers.gradleProperty(propertyName).getOrElse(defaultValue)
+    }
+
+    defaultTestContainersImages.each { propertyName, configuration ->
+        systemProperty configuration[0],
+            providers.gradleProperty(propertyName).getOrElse(configuration[1])
+    }
+
+    testLogging {
+        events 'failed', 'skipped'
+        exceptionFormat 'full'
+        showStandardStreams = true
+    }
+}
+
+tasks.register('patchTests', Test) {
+    description = 'Runs tests for musl-build-env source patches.'
+    group = 'verification'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    include '**/*PatchSpec.class'
+}
+
+tasks.register('compatTests', Test) {
+    description = 'Runs tests for the glibc compatibility shims.'
+    group = 'verification'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    include '**/*CompatSpec.class'
+}
+
+tasks.register('resolveAndLockAll', GradleBuild) {
+    description = 'Updates dependency locks and SHA-256 verification data.'
+    group = 'build setup'
+    dir = rootDir
+    tasks = ['resolveAndLockAllInputs']
+    startParameter.setRerunTasks(true)
+    startParameter.setWriteDependencyLocks(true)
+    startParameter.setWriteDependencyVerifications(['sha256'])
+}
+
+tasks.register('resolveAndLockAllInputs') {
+    dependsOn tasks.named('testClasses')
+    notCompatibleWithConfigurationCache(
+        'resolves configurations at execution time')
+
+    doFirst {
+        if (!gradle.startParameter.rerunTasks ||
+            !gradle.startParameter.writeDependencyLocks ||
+            gradle.startParameter.writeDependencyVerifications != ['sha256']) {
+            throw new GradleException(
+                'resolveAndLockAll did not enable its required write options')
+        }
+    }
+
+    doLast {
+        allprojects.each { project ->
+            project.configurations
+                .findAll { it.canBeResolved }
+                .each { it.resolve() }
+        }
+    }
+}

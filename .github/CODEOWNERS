@@ -1,0 +1,3 @@
+* @DataDog/musl-toolchain-maintainers
+
+/php-buildonly/ @DataDog/musl-toolchain-maintainers @DataDog/apm-php-core
