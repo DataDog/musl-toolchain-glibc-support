@@ -32,6 +32,8 @@ variables:
   GRADLE_ARGS: '--no-daemon'
   GRADLE_USER_HOME: '$CI_PROJECT_DIR/.gradle-home'
   IMAGE_MIRROR: 'registry.ddbuild.io/images/mirror'
+  MAVEN_REPOSITORY_PROXY: >-
+    https://depot-read-api-java.us1.ddbuild.io/magicmirror/magicmirror/@current/
   SOURCE_IMAGE: >-
     registry.ddbuild.io/ci/musl-toolchain-glibc-support/musl-build-env
 
@@ -67,9 +69,10 @@ variables:
       set -euo pipefail
       apt-get update
       DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        'make' \
-        'openjdk-17-jre-headless'
+        'make=4.3-4.1build2' \
+        'openjdk-17-jre-headless=17.0.20+8-1~24.04'
       rm -rf /var/lib/apt/lists/*
+      export ORG_GRADLE_PROJECT_mavenRepositoryProxy="${MAVEN_REPOSITORY_PROXY}"
       docker --version
       docker buildx version
       java -version

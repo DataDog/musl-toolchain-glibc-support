@@ -15,6 +15,8 @@ PHP_BUILDONLY_ARM64_IMAGE ?= php-buildonly:latest-aarch64
 
 MIRROR_BUILD_ARG = $(if $(strip $(IMAGE_MIRROR)),\
 	--build-arg IMAGE_MIRROR=$(IMAGE_MIRROR),)
+MIRROR_BAKE_ARG = $(if $(strip $(IMAGE_MIRROR)),\
+	--set '*.args.IMAGE_MIRROR=$(IMAGE_MIRROR)',)
 
 SHELL_SCRIPTS = \
 	musl-build-env/create-glibc-link-facades \
@@ -48,6 +50,7 @@ lint-docker:
 	$(DOCKER) buildx build --check --platform linux/amd64 \
 		$(MIRROR_BUILD_ARG) musl-build-env
 	$(DOCKER) buildx build --check --platform linux/amd64 \
+		--build-arg BUILD_ENV_IMAGE=scratch \
 		$(MIRROR_BUILD_ARG) php-buildonly
 
 lint-shell:
@@ -91,17 +94,19 @@ build-musl-build-env-arm64:
 		$(DOCKER_BUILD_ARGS) musl-build-env
 
 .PHONY: build-php-buildonly-amd64 build-php-buildonly-arm64
-build-php-buildonly-amd64: build-musl-build-env-amd64
-	$(DOCKER) buildx build --load --platform linux/amd64 \
-		--build-arg BUILD_ENV_IMAGE=$(MUSL_BUILD_ENV_AMD64_IMAGE) \
-		--tag $(PHP_BUILDONLY_AMD64_IMAGE) $(MIRROR_BUILD_ARG) \
-		$(DOCKER_BUILD_ARGS) php-buildonly
+build-php-buildonly-amd64:
+	$(DOCKER) buildx bake --load \
+		--set '*.platform=linux/amd64' \
+		--set 'musl-build-env.tags=$(MUSL_BUILD_ENV_AMD64_IMAGE)' \
+		--set 'php-buildonly.tags=$(PHP_BUILDONLY_AMD64_IMAGE)' \
+		$(MIRROR_BAKE_ARG) $(DOCKER_BUILD_ARGS) images
 
-build-php-buildonly-arm64: build-musl-build-env-arm64
-	$(DOCKER) buildx build --load --platform linux/arm64 \
-		--build-arg BUILD_ENV_IMAGE=$(MUSL_BUILD_ENV_ARM64_IMAGE) \
-		--tag $(PHP_BUILDONLY_ARM64_IMAGE) $(MIRROR_BUILD_ARG) \
-		$(DOCKER_BUILD_ARGS) php-buildonly
+build-php-buildonly-arm64:
+	$(DOCKER) buildx bake --load \
+		--set '*.platform=linux/arm64' \
+		--set 'musl-build-env.tags=$(MUSL_BUILD_ENV_ARM64_IMAGE)' \
+		--set 'php-buildonly.tags=$(PHP_BUILDONLY_ARM64_IMAGE)' \
+		$(MIRROR_BAKE_ARG) $(DOCKER_BUILD_ARGS) images
 
 .PHONY: test test-amd64 test-arm64
 test:

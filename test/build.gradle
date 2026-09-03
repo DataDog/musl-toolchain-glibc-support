@@ -2,8 +2,16 @@ plugins {
     id 'groovy'
 }
 
+def mavenRepositoryProxy = providers.gradleProperty('mavenRepositoryProxy')
+
 repositories {
-    mavenCentral()
+    if (mavenRepositoryProxy.isPresent()) {
+        maven {
+            url = uri(mavenRepositoryProxy.get())
+        }
+    } else {
+        mavenCentral()
+    }
 }
 
 dependencies {
