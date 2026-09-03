@@ -5,6 +5,7 @@ GRADLE ?= ./test/gradlew
 GRADLE_WRAPPER_SHA256 = 497c8c2a7e5031f6aa847f88104aa80a93532ec32ee17bdb8d1d2f67a194a9c7
 
 IMAGE_MIRROR ?=
+BUILDKIT_SYNTAX ?=
 DOCKER_BUILD_ARGS ?=
 GRADLE_ARGS ?=
 
@@ -17,6 +18,10 @@ MIRROR_BUILD_ARG = $(if $(strip $(IMAGE_MIRROR)),\
 	--build-arg IMAGE_MIRROR=$(IMAGE_MIRROR),)
 MIRROR_BAKE_ARG = $(if $(strip $(IMAGE_MIRROR)),\
 	--set '*.args.IMAGE_MIRROR=$(IMAGE_MIRROR)',)
+SYNTAX_BUILD_ARG = $(if $(strip $(BUILDKIT_SYNTAX)),\
+	--build-arg BUILDKIT_SYNTAX=$(BUILDKIT_SYNTAX),)
+SYNTAX_BAKE_ARG = $(if $(strip $(BUILDKIT_SYNTAX)),\
+	--set '*.args.BUILDKIT_SYNTAX=$(BUILDKIT_SYNTAX)',)
 
 SHELL_SCRIPTS = \
 	musl-build-env/create-glibc-link-facades \
@@ -26,7 +31,7 @@ SHELL_SCRIPTS = \
 	php-buildonly/phpize \
 	test/gradlew
 
-export IMAGE_MIRROR
+export BUILDKIT_SYNTAX IMAGE_MIRROR
 
 .DEFAULT_GOAL := help
 
@@ -48,10 +53,10 @@ lint: lint-docker lint-shell lint-gradle
 
 lint-docker:
 	$(DOCKER) buildx build --check --platform linux/amd64 \
-		$(MIRROR_BUILD_ARG) musl-build-env
+		$(MIRROR_BUILD_ARG) $(SYNTAX_BUILD_ARG) musl-build-env
 	$(DOCKER) buildx build --check --platform linux/amd64 \
 		--build-arg BUILD_ENV_IMAGE=scratch \
-		$(MIRROR_BUILD_ARG) php-buildonly
+		$(MIRROR_BUILD_ARG) $(SYNTAX_BUILD_ARG) php-buildonly
 
 lint-shell:
 	@set -e; \
@@ -86,12 +91,12 @@ build-arm64: build-php-buildonly-arm64
 build-musl-build-env-amd64:
 	$(DOCKER) buildx build --load --platform linux/amd64 \
 		--tag $(MUSL_BUILD_ENV_AMD64_IMAGE) $(MIRROR_BUILD_ARG) \
-		$(DOCKER_BUILD_ARGS) musl-build-env
+		$(SYNTAX_BUILD_ARG) $(DOCKER_BUILD_ARGS) musl-build-env
 
 build-musl-build-env-arm64:
 	$(DOCKER) buildx build --load --platform linux/arm64 \
 		--tag $(MUSL_BUILD_ENV_ARM64_IMAGE) $(MIRROR_BUILD_ARG) \
-		$(DOCKER_BUILD_ARGS) musl-build-env
+		$(SYNTAX_BUILD_ARG) $(DOCKER_BUILD_ARGS) musl-build-env
 
 .PHONY: build-php-buildonly-amd64 build-php-buildonly-arm64
 build-php-buildonly-amd64:
@@ -99,14 +104,16 @@ build-php-buildonly-amd64:
 		--set '*.platform=linux/amd64' \
 		--set 'musl-build-env.tags=$(MUSL_BUILD_ENV_AMD64_IMAGE)' \
 		--set 'php-buildonly.tags=$(PHP_BUILDONLY_AMD64_IMAGE)' \
-		$(MIRROR_BAKE_ARG) $(DOCKER_BUILD_ARGS) images
+		$(MIRROR_BAKE_ARG) $(SYNTAX_BAKE_ARG) \
+		$(DOCKER_BUILD_ARGS) images
 
 build-php-buildonly-arm64:
 	$(DOCKER) buildx bake --load \
 		--set '*.platform=linux/arm64' \
 		--set 'musl-build-env.tags=$(MUSL_BUILD_ENV_ARM64_IMAGE)' \
 		--set 'php-buildonly.tags=$(PHP_BUILDONLY_ARM64_IMAGE)' \
-		$(MIRROR_BAKE_ARG) $(DOCKER_BUILD_ARGS) images
+		$(MIRROR_BAKE_ARG) $(SYNTAX_BAKE_ARG) \
+		$(DOCKER_BUILD_ARGS) images
 
 .PHONY: test test-amd64 test-arm64
 test:

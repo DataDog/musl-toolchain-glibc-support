@@ -28,6 +28,8 @@ variables:
     registry.ddbuild.io/docker:29.4.0-noble@sha256:3d4a9fb50befc45c91e5fd7d6ffad0df5f926506739f4ebd2537e95abaeacd52
   CI_SCANNER_IMAGE: >-
     registry.ddbuild.io/ci/images:1.2.13@sha256:ea0fcfc284d0021960a409755bef5f97559797355344a5e04a5670a256b76e0d
+  BUILDKIT_SYNTAX: >-
+    registry.ddbuild.io/images/mirror/docker/dockerfile:1@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32
   DD_PKG_IMAGE: 'registry.ddbuild.io/agent-delivery/dd-pkg:v0.9.3'
   GRADLE_ARGS: '--no-daemon'
   GRADLE_USER_HOME: '$CI_PROJECT_DIR/.gradle-home'
