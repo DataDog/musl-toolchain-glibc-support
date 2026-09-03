@@ -77,6 +77,9 @@ variables:
       docker buildx version
       java -version
   variables:
+    KUBERNETES_POD_ANNOTATIONS_1: >-
+      beta.fabric.datadoghq.com/no-proxy-additions=archive.ubuntu.com,
+      security.ubuntu.com,download.docker.com,apt.releases.hashicorp.com
     KUBERNETES_CPU_REQUEST: '8'
     KUBERNETES_MEMORY_REQUEST: '24Gi'
     KUBERNETES_MEMORY_LIMIT: '30Gi'
