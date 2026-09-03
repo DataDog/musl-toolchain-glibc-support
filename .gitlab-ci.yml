@@ -66,6 +66,14 @@ variables:
 .docker-java-job:
   image: '$CI_JOB_IMAGE'
   interruptible: true
+  cache:
+    key:
+      files:
+        - test/gradle/wrapper/gradle-wrapper.properties
+      prefix: gradle
+    paths:
+      - .gradle-home/caches/
+      - .gradle-home/wrapper/
   before_script:
     - |
       set -euo pipefail
@@ -81,7 +89,8 @@ variables:
   variables:
     KUBERNETES_POD_ANNOTATIONS_1: >-
       beta.fabric.datadoghq.com/no-proxy-additions=archive.ubuntu.com,
-      security.ubuntu.com,download.docker.com,apt.releases.hashicorp.com
+      security.ubuntu.com,download.docker.com,apt.releases.hashicorp.com,
+      services.gradle.org,github.com,release-assets.githubusercontent.com
     KUBERNETES_CPU_REQUEST: '8'
     KUBERNETES_MEMORY_REQUEST: '24Gi'
     KUBERNETES_MEMORY_LIMIT: '30Gi'
