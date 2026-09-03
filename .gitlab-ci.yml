@@ -33,11 +33,14 @@ variables:
   DD_PKG_IMAGE: 'registry.ddbuild.io/agent-delivery/dd-pkg:v0.9.3'
   GRADLE_ARGS: '--no-daemon'
   GRADLE_USER_HOME: '$CI_PROJECT_DIR/.gradle-home'
+  GIT_DEPTH: '0'
   IMAGE_MIRROR: 'registry.ddbuild.io/images/mirror'
   MAVEN_REPOSITORY_PROXY: >-
     https://depot-read-api-java.us1.ddbuild.io/magicmirror/magicmirror/@current/
   SOURCE_IMAGE: >-
     registry.ddbuild.io/ci/musl-toolchain-glibc-support/musl-build-env
+  PHP_SOURCE_IMAGE: >-
+    registry.ddbuild.io/ci/musl-toolchain-glibc-support/php-buildonly
 
 .validation-rules:
   rules:
@@ -112,7 +115,7 @@ variables:
     - &platform-build-and-test |
       set -euo pipefail
       source_image="${SOURCE_IMAGE}:${CI_COMMIT_SHA}-${ARCH}"
-      php_image="php-buildonly:${CI_COMMIT_SHA}-${ARCH}"
+      php_image="${PHP_SOURCE_IMAGE}:${CI_COMMIT_SHA}-${ARCH}"
 
       case "${ARCH}" in
         amd64)
@@ -129,9 +132,42 @@ variables:
           ;;
       esac
 
-      make "test-${ARCH}" \
-        "${musl_image_variable}=${source_image}" \
-        "${php_image_variable}=${php_image}"
+      musl_build_plan=$(ci/musl-build-plan)
+      set -- ${musl_build_plan}
+      test "$#" -eq 2
+      case "$1" in build|reuse) ;; *) exit 1 ;; esac
+      musl_build_mode=$1
+      musl_source_commit=$2
+      if [ "${musl_build_mode}" = reuse ]; then
+        musl_source_tag="${SOURCE_IMAGE}:${musl_source_commit}"
+        inspect_file=$(mktemp)
+        trap 'rm -f "${inspect_file}"' EXIT
+        if ! docker buildx imagetools inspect "${musl_source_tag}" \
+            --format '{{json .Manifest}}' > "${inspect_file}"; then
+          echo "No built musl-build-env index for ${musl_source_commit}" >&2
+          exit 1
+        fi
+        jq -e '
+          (.manifests | length) == 2 and
+          ([.manifests[].platform | [.os, .architecture]] | sort) ==
+            [["linux", "amd64"], ["linux", "arm64"]]
+        ' "${inspect_file}"
+        musl_source_digest=$(jq -er '.digest' "${inspect_file}")
+        resolved_musl_image="${SOURCE_IMAGE}@${musl_source_digest}"
+        ddsign verify "${resolved_musl_image}" --roles ci
+
+        printf 'Reusing musl-build-env from %s: %s\n' \
+          "${musl_source_commit}" "${resolved_musl_image}"
+        make "test-php-buildonly-${ARCH}" \
+          "${musl_image_variable}=${resolved_musl_image}" \
+          "${php_image_variable}=${php_image}"
+      else
+        printf 'Building musl-build-env from current commit %s\n' \
+          "${CI_COMMIT_SHA}"
+        make "test-${ARCH}" \
+          "${musl_image_variable}=${source_image}" \
+          "${php_image_variable}=${php_image}"
+      fi
 
 lint:
   extends: .docker-java-job
@@ -171,10 +207,23 @@ stage-platform:
       command -v docker-credential-ci
 
       source_image="${SOURCE_IMAGE}:${CI_COMMIT_SHA}-${ARCH}"
-      docker push "${source_image}"
-      digest=$(docker buildx imagetools inspect "${source_image}" \
+      php_image="${PHP_SOURCE_IMAGE}:${CI_COMMIT_SHA}-${ARCH}"
+
+      docker push "${php_image}"
+      php_digest=$(docker buildx imagetools inspect "${php_image}" \
         --format '{{.Manifest.Digest}}')
-      printf 'Pushed %s@%s\n' "${source_image}" "${digest}"
+      printf 'Pushed %s@%s\n' "${php_image}" "${php_digest}"
+
+      musl_build_plan=$(ci/musl-build-plan)
+      set -- ${musl_build_plan}
+      test "$#" -eq 2
+      case "$1" in build|reuse) ;; *) exit 1 ;; esac
+      if [ "$1" = build ]; then
+        docker push "${source_image}"
+        musl_digest=$(docker buildx imagetools inspect "${source_image}" \
+          --format '{{.Manifest.Digest}}')
+        printf 'Pushed %s@%s\n' "${source_image}" "${musl_digest}"
+      fi
 
 manifest:
   extends: .main-rules
@@ -197,39 +246,93 @@ manifest:
       set -euo pipefail
       command -v docker-credential-ci
 
-      amd64_image="${SOURCE_IMAGE}:${CI_COMMIT_SHA}-amd64"
-      arm64_image="${SOURCE_IMAGE}:${CI_COMMIT_SHA}-arm64"
-      index_image="${SOURCE_IMAGE}:${CI_COMMIT_SHA}"
-      metadata_file=$(mktemp)
-      inspect_file=$(mktemp)
-      trap 'rm -f "${metadata_file}" "${inspect_file}"' EXIT
+      temporary_directory=$(mktemp -d)
+      trap 'rm -rf "${temporary_directory}"' EXIT
 
-      docker buildx imagetools create \
-        --metadata-file "${metadata_file}" \
-        --tag "${index_image}" \
-        "${amd64_image}" \
-        "${arm64_image}"
-      docker buildx imagetools inspect "${index_image}" \
-        --format '{{json .Manifest}}' > "${inspect_file}"
+      inspect_index() {
+        local -r index_image="$1"
+        local -r inspect_file="$2"
 
-      jq -e '
-        (.manifests | length) == 2 and
-        ([.manifests[].platform | [.os, .architecture]] | sort) ==
-          [["linux", "amd64"], ["linux", "arm64"]]
-      ' "${inspect_file}"
+        docker buildx imagetools inspect "${index_image}" \
+          --format '{{json .Manifest}}' > "${inspect_file}"
+        jq -e '
+          (.manifests | length) == 2 and
+          ([.manifests[].platform | [.os, .architecture]] | sort) ==
+            [["linux", "amd64"], ["linux", "arm64"]]
+        ' "${inspect_file}" > /dev/null
+        jq -er '.digest' "${inspect_file}"
+      }
 
-      digest=$(jq -er '
-        .["containerimage.digest"] //
-        .["containerimage.descriptor"].digest
-      ' "${metadata_file}")
-      inspected_digest=$(jq -er '.digest' "${inspect_file}")
-      test "${digest}" = "${inspected_digest}"
+      create_and_sign_index() {
+        local -r image="$1"
+        local -r name="$2"
+        local -r amd64_image="${image}:${CI_COMMIT_SHA}-amd64"
+        local -r arm64_image="${image}:${CI_COMMIT_SHA}-arm64"
+        local -r index_image="${image}:${CI_COMMIT_SHA}"
+        local -r metadata_file="${temporary_directory}/${name}-metadata.json"
+        local -r inspect_file="${temporary_directory}/${name}-inspect.json"
+        local digest
+        local inspected_digest
 
-      # imagetools metadata is not buildx build metadata. Sign the exact
-      # already-pushed digest, as dd-trace-php does for separately signed
-      # images.
-      ddsign sign "${index_image}@${digest}"
-      printf 'Internal source index: %s@%s\n' "${SOURCE_IMAGE}" "${digest}"
+        docker buildx imagetools create \
+          --metadata-file "${metadata_file}" \
+          --tag "${index_image}" \
+          "${amd64_image}" \
+          "${arm64_image}"
+
+        digest=$(jq -er '
+          .["containerimage.digest"] //
+          .["containerimage.descriptor"].digest
+        ' "${metadata_file}")
+        inspected_digest=$(inspect_index "${index_image}" "${inspect_file}")
+        test "${digest}" = "${inspected_digest}"
+
+        # imagetools metadata is not buildx build metadata. Sign the exact
+        # already-pushed digest, as dd-trace-php does for separately signed
+        # images.
+        ddsign sign "${index_image}@${digest}"
+        printf 'Internal source index: %s@%s\n' "${image}" "${digest}"
+      }
+
+      tag_reused_index() {
+        local -r image="$1"
+        local -r source_commit="$2"
+        local -r name="$3"
+        local -r source_index="${image}:${source_commit}"
+        local -r current_index="${image}:${CI_COMMIT_SHA}"
+        local -r inspect_file="${temporary_directory}/${name}-inspect.json"
+        local source_digest
+        local current_digest
+
+        source_digest=$(inspect_index "${source_index}" "${inspect_file}")
+        ddsign verify "${image}@${source_digest}" --roles ci
+
+        # Signatures cover digests, so the identical index needs only a new
+        # commit-addressed tag, not another signature.
+        docker buildx imagetools create \
+          --tag "${current_index}" \
+          "${image}@${source_digest}"
+        current_digest=$(inspect_index "${current_index}" "${inspect_file}")
+        test "${current_digest}" = "${source_digest}"
+        ddsign verify "${image}@${current_digest}" --roles ci
+
+        printf 'Reused internal source index: %s@%s\n' \
+          "${current_index}" "${current_digest}"
+      }
+
+      musl_build_plan=$(ci/musl-build-plan)
+      set -- ${musl_build_plan}
+      test "$#" -eq 2
+      case "$1" in build|reuse) ;; *) exit 1 ;; esac
+      musl_build_mode=$1
+      musl_source_commit=$2
+      if [ "${musl_build_mode}" = build ]; then
+        create_and_sign_index "${SOURCE_IMAGE}" musl-build-env
+      else
+        tag_reused_index \
+          "${SOURCE_IMAGE}" "${musl_source_commit}" musl-build-env
+      fi
+      create_and_sign_index "${PHP_SOURCE_IMAGE}" php-buildonly
 
 resolve-release:
   extends: .release-rules

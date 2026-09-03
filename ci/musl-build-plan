@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+
+# Tell CI whether to rebuild musl-build-env or reuse the last commit that
+# changed its inputs. Output is "<build|reuse> <source commit|->".
+
+set -eu
+
+: "${CI_COMMIT_SHA:?}" "${CI_DEFAULT_BRANCH:?}" "${CI_PIPELINE_SOURCE:?}"
+
+commit_exists() {
+    local -r candidate_commit="${1:-}"
+
+    [ -n "${candidate_commit}" ] &&
+        git cat-file -e "${candidate_commit}^{commit}" 2>/dev/null
+}
+
+is_default_branch_push() {
+    [[ "${CI_PIPELINE_SOURCE}" == push &&
+        "${CI_COMMIT_BRANCH:-}" == "${CI_DEFAULT_BRANCH}" ]]
+}
+
+default_branch_merge_base() {
+    local -r target_ref="refs/remotes/origin/${CI_DEFAULT_BRANCH}"
+    if ! git show-ref --verify --quiet "${target_ref}"; then
+        git fetch --no-tags origin \
+            "+refs/heads/${CI_DEFAULT_BRANCH}:${target_ref}" >&2
+    fi
+    git merge-base "${CI_COMMIT_SHA}" "${target_ref}"
+}
+
+find_comparison_base() {
+    # Reusable images only exist for default-branch history. A default-branch
+    # push compares with its parent; every other commit compares with its merge
+    # base with the default branch.
+    if is_default_branch_push; then
+        git rev-parse "${CI_COMMIT_SHA}^" 2>/dev/null || true
+    else
+        default_branch_merge_base
+    fi
+}
+
+musl_inputs_unchanged() {
+    local -r comparison_base="$1"
+
+    git diff --quiet "${comparison_base}" "${CI_COMMIT_SHA}" -- \
+        .gitlab-ci.yml \
+        Makefile \
+        docker-bake.hcl \
+        ci/musl-build-plan \
+        musl-build-env
+}
+
+find_latest_musl_input_commit() {
+    local -r search_from_commit="$1"
+
+    git log --first-parent -1 --format=%H "${search_from_commit}" -- \
+        .gitlab-ci.yml \
+        Makefile \
+        docker-bake.hcl \
+        ci/musl-build-plan \
+        musl-build-env
+}
+
+comparison_base=$(find_comparison_base)
+
+if ! commit_exists "${comparison_base}"; then
+    # A root commit has no reusable ancestor.
+    printf '%s\n' 'build -'
+    exit 0
+fi
+
+if ! musl_inputs_unchanged "${comparison_base}"; then
+    printf '%s\n' 'build -'
+    exit 0
+fi
+
+musl_source_commit=$(find_latest_musl_input_commit "${comparison_base}")
+if [ -z "${musl_source_commit}" ]; then
+    echo 'No preceding musl-build-env source commit found' >&2
+    exit 1
+fi
+
+printf 'reuse %s\n' "${musl_source_commit}"

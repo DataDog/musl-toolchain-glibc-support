@@ -24,6 +24,7 @@ SYNTAX_BAKE_ARG = $(if $(strip $(BUILDKIT_SYNTAX)),\
 	--set '*.args.BUILDKIT_SYNTAX=$(BUILDKIT_SYNTAX)',)
 
 SHELL_SCRIPTS = \
+	ci/musl-build-plan \
 	musl-build-env/create-glibc-link-facades \
 	musl-build-env/embed-private-archive-members \
 	php-buildonly/assemble-php-sdks \
@@ -43,6 +44,8 @@ help:
 		'  build         Build both images for the Docker host architecture' \
 		'  build-amd64   Build both linux/amd64 images' \
 		'  build-arm64   Build both linux/arm64 images' \
+		'  build-php-buildonly-amd64  Build only php-buildonly for linux/amd64' \
+		'  build-php-buildonly-arm64  Build only php-buildonly for linux/arm64' \
 		'  test          Build and run all tests for the Docker host architecture' \
 		'  test-amd64    Build and run all tests on an amd64 Docker host' \
 		'  test-arm64    Build and run all tests on an arm64 Docker host' \
@@ -83,9 +86,9 @@ build:
 		*) echo 'Unsupported Docker host architecture' >&2; exit 1 ;; \
 	esac
 
-build-amd64: build-php-buildonly-amd64
+build-amd64: build-images-amd64
 
-build-arm64: build-php-buildonly-arm64
+build-arm64: build-images-arm64
 
 .PHONY: build-musl-build-env-amd64 build-musl-build-env-arm64
 build-musl-build-env-amd64:
@@ -98,8 +101,8 @@ build-musl-build-env-arm64:
 		--tag $(MUSL_BUILD_ENV_ARM64_IMAGE) $(MIRROR_BUILD_ARG) \
 		$(SYNTAX_BUILD_ARG) $(DOCKER_BUILD_ARGS) musl-build-env
 
-.PHONY: build-php-buildonly-amd64 build-php-buildonly-arm64
-build-php-buildonly-amd64:
+.PHONY: build-images-amd64 build-images-arm64
+build-images-amd64:
 	$(DOCKER) buildx bake --load \
 		--set '*.platform=linux/amd64' \
 		--set 'musl-build-env.tags=$(MUSL_BUILD_ENV_AMD64_IMAGE)' \
@@ -107,7 +110,7 @@ build-php-buildonly-amd64:
 		$(MIRROR_BAKE_ARG) $(SYNTAX_BAKE_ARG) \
 		$(DOCKER_BUILD_ARGS) images
 
-build-php-buildonly-arm64:
+build-images-arm64:
 	$(DOCKER) buildx bake --load \
 		--set '*.platform=linux/arm64' \
 		--set 'musl-build-env.tags=$(MUSL_BUILD_ENV_ARM64_IMAGE)' \
@@ -115,7 +118,27 @@ build-php-buildonly-arm64:
 		$(MIRROR_BAKE_ARG) $(SYNTAX_BAKE_ARG) \
 		$(DOCKER_BUILD_ARGS) images
 
+.PHONY: build-php-buildonly-amd64 build-php-buildonly-arm64
+build-php-buildonly-amd64:
+	$(DOCKER) buildx build --load --platform linux/amd64 \
+		--tag $(PHP_BUILDONLY_AMD64_IMAGE) \
+		--build-arg BUILD_ENV_IMAGE=musl-build-env \
+		--build-context \
+		musl-build-env=docker-image://$(MUSL_BUILD_ENV_AMD64_IMAGE) \
+		$(MIRROR_BUILD_ARG) $(SYNTAX_BUILD_ARG) \
+		$(DOCKER_BUILD_ARGS) php-buildonly
+
+build-php-buildonly-arm64:
+	$(DOCKER) buildx build --load --platform linux/arm64 \
+		--tag $(PHP_BUILDONLY_ARM64_IMAGE) \
+		--build-arg BUILD_ENV_IMAGE=musl-build-env \
+		--build-context \
+		musl-build-env=docker-image://$(MUSL_BUILD_ENV_ARM64_IMAGE) \
+		$(MIRROR_BUILD_ARG) $(SYNTAX_BUILD_ARG) \
+		$(DOCKER_BUILD_ARGS) php-buildonly
+
 .PHONY: test test-amd64 test-arm64
+.PHONY: test-php-buildonly-amd64 test-php-buildonly-arm64
 test:
 	@set -e; \
 	case "$$($(DOCKER) info --format '{{.Architecture}}')" in \
@@ -129,6 +152,14 @@ test-amd64: require-amd64 build-amd64
 		-PbuildEnvImage=$(MUSL_BUILD_ENV_AMD64_IMAGE) $(GRADLE_ARGS)
 
 test-arm64: require-arm64 build-arm64
+	$(GRADLE) --project-dir test test \
+		-PbuildEnvImage=$(MUSL_BUILD_ENV_ARM64_IMAGE) $(GRADLE_ARGS)
+
+test-php-buildonly-amd64: require-amd64 build-php-buildonly-amd64
+	$(GRADLE) --project-dir test test \
+		-PbuildEnvImage=$(MUSL_BUILD_ENV_AMD64_IMAGE) $(GRADLE_ARGS)
+
+test-php-buildonly-arm64: require-arm64 build-php-buildonly-arm64
 	$(GRADLE) --project-dir test test \
 		-PbuildEnvImage=$(MUSL_BUILD_ENV_ARM64_IMAGE) $(GRADLE_ARGS)
 

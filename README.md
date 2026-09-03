@@ -17,7 +17,9 @@ The public image is `datadog/musl-build-env`. Releases support:
 - `linux/arm64`
 
 The `php-buildonly` directory contains a derived build image used by this
-repository's test matrix. It is not part of the current public image contract.
+repository's test matrix. Protected `main` pipelines build and sign its
+commit-addressed internal amd64/arm64 index, but it is not part of the current
+public image contract.
 
 Release images are copied to these public locations:
 
@@ -78,6 +80,14 @@ make check
 ```
 
 Use `make help` to list the architecture-specific build and test targets.
+
+When only derived-image inputs change, CI builds `php-buildonly` against the
+newest relevant `musl-build-env` index. Validation pipelines compare the
+checked-out commit with its merge base with `main`; protected `main` pipelines
+compare the current commit with its first parent. CI verifies the selected
+index's signature and pins the build to its immutable digest. Every protected
+`main` pipeline tags that digest with its own commit, even when the image is
+reused. CI does not interpret the public `latest` tag as a build input.
 
 ## Security
 
