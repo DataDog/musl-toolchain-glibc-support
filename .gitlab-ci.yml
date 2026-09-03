@@ -201,9 +201,8 @@ manifest:
       arm64_image="${SOURCE_IMAGE}:${CI_COMMIT_SHA}-arm64"
       index_image="${SOURCE_IMAGE}:${CI_COMMIT_SHA}"
       metadata_file=$(mktemp)
-      signing_metadata_file=$(mktemp)
       inspect_file=$(mktemp)
-      trap 'rm -f "${metadata_file}" "${signing_metadata_file}" "${inspect_file}"' EXIT
+      trap 'rm -f "${metadata_file}" "${inspect_file}"' EXIT
 
       docker buildx imagetools create \
         --metadata-file "${metadata_file}" \
@@ -226,18 +225,10 @@ manifest:
       inspected_digest=$(jq -er '.digest' "${inspect_file}")
       test "${digest}" = "${inspected_digest}"
 
-      # imagetools records only the repository in image.name. Without that
-      # field, ddsign uses the tagged positional reference with this digest.
-      jq -e \
-        --arg source_image "${SOURCE_IMAGE}" '
-          if .["image.name"] != $source_image then
-            error("unexpected image.name in Docker metadata")
-          else
-            del(.["image.name"])
-          end
-        ' "${metadata_file}" > "${signing_metadata_file}"
-      ddsign sign "${index_image}" \
-        --docker-metadata-file "${signing_metadata_file}"
+      # imagetools metadata is not buildx build metadata. Sign the exact
+      # already-pushed digest, as dd-trace-php does for separately signed
+      # images.
+      ddsign sign "${index_image}@${digest}"
       printf 'Internal source index: %s@%s\n' "${SOURCE_IMAGE}" "${digest}"
 
 resolve-release:
