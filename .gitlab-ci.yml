@@ -1,9 +1,10 @@
 workflow:
   rules:
+    # DDCI receives only stable-version tag events allowlisted for this
+    # repository. GitLab does not preserve GitHub tag-ruleset restrictions.
     - if: >-
         $CI_COMMIT_TAG =~
-        /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/ &&
-        $CI_COMMIT_REF_PROTECTED == "true"
+        /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/
     - if: '$CI_COMMIT_TAG'
       when: never
     - if: '$CI_PIPELINE_SOURCE == "external_pull_request_event"'
@@ -61,8 +62,7 @@ variables:
   rules:
     - if: >-
         $CI_COMMIT_TAG =~
-        /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/ &&
-        $CI_COMMIT_REF_PROTECTED == "true"
+        /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/
       interruptible: false
     - when: never
 

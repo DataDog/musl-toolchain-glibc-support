@@ -15,9 +15,14 @@ Before creating a release tag, confirm that:
 
 ## Release
 
-Create a protected tag in the bare `MAJOR.MINOR.PATCH` form, such as `1.0.0`,
-at the tested `main` commit. Creating the tag is the release action; there is no
-manual publication job.
+To release, create a bare `MAJOR.MINOR.PATCH` tag, such as `1.0.0`, at the
+tested `main` commit. GitHub repository rulesets restrict who may create these
+tags and prevent them from being updated or deleted. Codesync then mirrors the
+tag to GitLab, where DDCI's repository-specific allowlist starts a pipeline
+only for the same stable-version pattern. Because GitLab cannot represent the
+GitHub ruleset state on the mirrored tag, the release jobs intentionally do
+not require `CI_COMMIT_REF_PROTECTED`. Creating the tag starts the entire
+release; there is no manual publication job.
 
 The tag pipeline:
 
