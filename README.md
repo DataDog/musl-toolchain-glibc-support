@@ -78,8 +78,8 @@ Maintainers should follow [the release procedure](docs/releasing.md).
 
 ## Development
 
-Docker with Buildx and Java 17 or newer are required. Run the complete native
-suite with:
+See [CONTRIBUTING.md](CONTRIBUTING.md) for local prerequisites and the complete
+build and test workflow. The complete native suite is:
 
 ```sh
 make check
@@ -103,4 +103,5 @@ Do not report security vulnerabilities in a public issue. Follow Datadog's
 ## License
 
 This project is licensed under Apache License 2.0 with LLVM Exceptions. See
-[LICENSE.TXT](LICENSE.TXT).
+[LICENSE](LICENSE). Third-party software is listed in
+[LICENSE-3rdparty.csv](LICENSE-3rdparty.csv).
