@@ -2,7 +2,7 @@
 
 DOCKER ?= docker
 GRADLE ?= ./test/gradlew
-GRADLE_WRAPPER_SHA256 = 497c8c2a7e5031f6aa847f88104aa80a93532ec32ee17bdb8d1d2f67a194a9c7
+GRADLE_WRAPPER_SHA256 = 7a9ce74cff467ca1bf60a4fcd9f05185acceda4d0f382434d393e17864262c5d
 
 IMAGE_MIRROR ?=
 BUILDKIT_SYNTAX ?=
@@ -72,7 +72,7 @@ lint-gradle:
 	@actual="$$(openssl dgst -sha256 \
 		test/gradle/wrapper/gradle-wrapper.jar | awk '{print $$NF}')"; \
 	if [ "$$actual" != "$(GRADLE_WRAPPER_SHA256)" ]; then \
-		echo 'Gradle wrapper JAR checksum does not match Gradle 9.6.1' >&2; \
+		echo 'Gradle wrapper JAR checksum does not match Gradle 9.7.1' >&2; \
 		exit 1; \
 	fi
 	$(GRADLE) --project-dir test testClasses $(GRADLE_ARGS)

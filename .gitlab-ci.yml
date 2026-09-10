@@ -23,6 +23,7 @@ stages:
   - resolve
   - scan
   - publish
+  - alias
 
 variables:
   CI_JOB_IMAGE: >-
@@ -93,7 +94,8 @@ variables:
     KUBERNETES_POD_ANNOTATIONS_1: >-
       beta.fabric.datadoghq.com/no-proxy-additions=archive.ubuntu.com,
       security.ubuntu.com,download.docker.com,apt.releases.hashicorp.com,
-      services.gradle.org,github.com,release-assets.githubusercontent.com
+      services.gradle.org,maven-central.storage-download.googleapis.com,
+      github.com,release-assets.githubusercontent.com
     KUBERNETES_CPU_REQUEST: '8'
     KUBERNETES_MEMORY_REQUEST: '24Gi'
     KUBERNETES_MEMORY_LIMIT: '30Gi'
@@ -448,18 +450,11 @@ scan-release:
         ci/musl-toolchain-glibc-support/php-buildonly \
         php-buildonly/Dockerfile
 
-publish-release:
+.publish-job:
   extends: .release-rules
-  stage: publish
   image: '$DD_PKG_IMAGE'
   tags:
     - 'arch:arm64'
-  needs:
-    - job: resolve-release
-      artifacts: true
-    - job: scan-release
-      artifacts: false
-  resource_group: musl-build-env-publication
   timeout: 135m
   variables:
     KUBERNETES_SERVICE_ACCOUNT_OVERWRITE: musl-toolchain-glibc-support
@@ -469,7 +464,16 @@ publish-release:
     KUBERNETES_MEMORY_REQUEST: '2Gi'
     KUBERNETES_MEMORY_LIMIT: '4Gi'
     PUBLIC_IMAGES_PUBLISH_TIMEOUT: '1800'
-  script:
+
+.publish-version-job:
+  extends: .publish-job
+  stage: publish
+  needs:
+    - job: resolve-release
+      artifacts: true
+    - job: scan-release
+      artifacts: false
+  before_script:
     - |
       set -euo pipefail
       temporary_directory=$(mktemp -d)
@@ -527,6 +531,40 @@ publish-release:
           --signing=false
       }
 
+      dd-pkg version
+
+publish-musl-build-env:
+  extends: .publish-version-job
+  resource_group: musl-build-env-publication
+  script:
+    - |
+      check_public_version \
+        musl-build-env "${MUSL_BUILD_ENV_RELEASE_DIGEST}"
+      publish_version \
+        public "${MUSL_BUILD_ENV_RELEASE_SOURCE}" musl-build-env
+
+publish-php-buildonly:
+  extends: .publish-version-job
+  resource_group: php-buildonly-publication
+  script:
+    - |
+      check_public_version \
+        php-buildonly "${PHP_BUILDONLY_RELEASE_DIGEST}"
+      publish_version \
+        dockerhub "${PHP_BUILDONLY_RELEASE_SOURCE}" php-buildonly
+
+.publish-latest-job:
+  extends: .publish-job
+  stage: alias
+  needs:
+    - job: publish-musl-build-env
+      artifacts: false
+    - job: publish-php-buildonly
+      artifacts: false
+  before_script:
+    - |
+      set -euo pipefail
+
       publish_latest() {
         local -r registries="$1"
         local -r image="$2"
@@ -540,17 +578,18 @@ publish-release:
           --signing=false
       }
 
-      check_public_version \
-        musl-build-env "${MUSL_BUILD_ENV_RELEASE_DIGEST}"
-      check_public_version \
-        php-buildonly "${PHP_BUILDONLY_RELEASE_DIGEST}"
-
       dd-pkg version
-      publish_version \
-        public "${MUSL_BUILD_ENV_RELEASE_SOURCE}" musl-build-env
-      publish_version \
-        dockerhub "${PHP_BUILDONLY_RELEASE_SOURCE}" php-buildonly
 
-      # Do not advance either mutable alias until both immutable versions exist.
+update-musl-build-env-latest:
+  extends: .publish-latest-job
+  resource_group: musl-build-env-publication
+  script:
+    - |
       publish_latest public musl-build-env
+
+update-php-buildonly-latest:
+  extends: .publish-latest-job
+  resource_group: php-buildonly-publication
+  script:
+    - |
       publish_latest dockerhub php-buildonly

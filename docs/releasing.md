@@ -32,11 +32,12 @@ The tag pipeline:
    sets;
 3. scans both immutable digests with `imageinspector` and fails if either
    centralized result blocks publication;
-4. checks Docker Hub for conflicting version tags for either image;
+4. checks Docker Hub for a conflicting version tag in each image's separate
+   publication job;
 5. publishes `musl-build-env` to the logical `public` registry group and
-   `php-buildonly` only to the logical `dockerhub` registry; and
-6. after both version publications succeed, retags both public versions as
-   `latest` in their respective registry sets.
+   `php-buildonly` only to the logical `dockerhub` registry in parallel; and
+6. after both version publication jobs succeed, independently retags each
+   public version as `latest` in its respective registry set.
 
 A pipeline retry is safe when each existing Docker Hub version tag points to
 the corresponding internal digest. A different digest is a hard failure and

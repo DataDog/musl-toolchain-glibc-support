@@ -15,13 +15,13 @@ repositories {
 }
 
 dependencies {
-    testImplementation 'org.apache.groovy:groovy:4.0.30'
-    testImplementation 'org.spockframework:spock-core:2.4-groovy-4.0'
+    testImplementation 'org.apache.groovy:groovy:5.1.2'
+    testImplementation 'org.spockframework:spock-core:2.4-groovy-5.0'
     testImplementation platform('org.testcontainers:testcontainers-bom:2.0.5')
     testImplementation 'org.testcontainers:testcontainers'
     testImplementation 'org.testcontainers:testcontainers-spock'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
-    testRuntimeOnly 'org.slf4j:slf4j-simple:1.7.36'
+    testRuntimeOnly 'org.slf4j:slf4j-simple:2.0.19'
 }
 
 java {
