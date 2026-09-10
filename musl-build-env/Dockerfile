@@ -253,13 +253,16 @@ RUN set -eux; \
     rm /tmp/glibc_compat.o
 
 # Keep patched LLVM production sources for debugging, but never copy build
-# trees or the 1.6 GiB of test inputs and unit-test sources into the final image.
+# trees, the 1.6 GiB of test inputs and unit-test sources, or unused editor
+# integrations into the final image.
 RUN set -eux; \
     SOURCE_DIR="/llvm-project-${LLVM_VERSION}.src"; \
     rm -rf "${SOURCE_DIR}/build" \
            "${SOURCE_DIR}/build-asan" \
            "${SOURCE_DIR}/build-msan" \
-           "${SOURCE_DIR}/build-msan-unwind"; \
+           "${SOURCE_DIR}/build-msan-unwind" \
+           "${SOURCE_DIR}/lldb/tools/lldb-dap" \
+           "${SOURCE_DIR}/mlir/utils/vscode"; \
     find "${SOURCE_DIR}" -type d \
         \( -name test -o -name tests -o -name unittests \) \
         -prune -exec rm -rf {} +
@@ -336,4 +339,6 @@ RUN set -eux; \
     test ! -e "/llvm-project-${LLVM_VERSION}.src/build"; \
     test ! -e "/llvm-project-${LLVM_VERSION}.src/build-asan"; \
     test ! -e "/llvm-project-${LLVM_VERSION}.src/build-msan"; \
-    test ! -e "/llvm-project-${LLVM_VERSION}.src/build-msan-unwind"
+    test ! -e "/llvm-project-${LLVM_VERSION}.src/build-msan-unwind"; \
+    test ! -e "/llvm-project-${LLVM_VERSION}.src/lldb/tools/lldb-dap"; \
+    test ! -e "/llvm-project-${LLVM_VERSION}.src/mlir/utils/vscode"
