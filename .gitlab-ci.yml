@@ -395,7 +395,6 @@ scan-release:
 
       ddsign verify "${RELEASE_SOURCE}" --roles ci
       imageinspector scan \
-        --target prod \
         --registry registry.ddbuild.io \
         --repository ci/musl-toolchain-glibc-support/musl-build-env \
         --digest "${RELEASE_DIGEST}" \
