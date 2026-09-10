@@ -428,6 +428,8 @@ publish-release:
   timeout: 75m
   variables:
     KUBERNETES_SERVICE_ACCOUNT_OVERWRITE: musl-toolchain-glibc-support
+    KUBERNETES_POD_ANNOTATIONS_1: >-
+      beta.fabric.datadoghq.com/no-proxy-additions=hub.docker.com
     KUBERNETES_CPU_REQUEST: '1'
     KUBERNETES_MEMORY_REQUEST: '2Gi'
     KUBERNETES_MEMORY_LIMIT: '4Gi'
