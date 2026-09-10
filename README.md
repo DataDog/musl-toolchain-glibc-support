@@ -3,7 +3,8 @@
 This repository builds a native musl toolchain image whose compiler wrappers
 produce executables that can be prepared to run on both musl and glibc systems.
 It provides Clang, LLVM runtimes, libc compatibility objects, and a CMake
-toolchain file for projects that need this build model.
+toolchain file for projects that need this build model. Development headers for
+OpenSSL, PCRE, PCRE2, and zlib are included, together with Perl.
 
 This is targeted compatibility support, not general glibc emulation. Validate
 each application's complete dependency set. Executables using the included musl
@@ -11,17 +12,18 @@ sanitizer runtimes are supported only on musl.
 
 ## Images and platforms
 
-The public image is `datadog/musl-build-env`. Releases support:
+This repository publishes two images:
+
+- `datadog/musl-build-env`, the base musl toolchain; and
+- `datadog/php-buildonly`, a derived image containing build-only PHP SDKs for
+  PHP 7.0 through 8.5.
+
+Both images support:
 
 - `linux/amd64`
 - `linux/arm64`
 
-The `php-buildonly` directory contains a derived build image used by this
-repository's test matrix. Protected `main` pipelines build and sign its
-commit-addressed internal amd64/arm64 index, but it is not part of the current
-public image contract.
-
-Release images are copied to these public locations:
+`musl-build-env` releases are copied to these public locations:
 
 - `docker.io/datadog/musl-build-env`
 - `datadoghq.azurecr.io/musl-build-env`
@@ -32,6 +34,9 @@ Release images are copied to these public locations:
 - `public.ecr.aws/datadog/musl-build-env`
 - `registry.datad0g.com/musl-build-env`
 - `registry.datadoghq.com/musl-build-env`
+
+`php-buildonly` releases are copied only to
+`docker.io/datadog/php-buildonly`.
 
 ## Usage
 
@@ -59,11 +64,12 @@ sanitizer behavior, and test commands.
 ## Tags and releases
 
 Stable releases use bare semantic versions such as `1.0.0`. Version tags are
-immutable; corrections receive a new patch version. The mutable `latest` alias
-advances only after the corresponding version has been published successfully.
+immutable; corrections receive a new patch version. The mutable `latest`
+aliases advance only after both versioned images have been published
+successfully.
 
-Protected release pipelines sign and scan the tested internal image digest,
-then ask Datadog's Artifact Gateway to publish it. The
+Protected release pipelines verify and scan both tested internal image digests,
+then ask Datadog's Artifact Gateway to publish them. The
 [`DataDog/public-images`](https://github.com/DataDog/public-images) project owns
 the public-registry credentials and performs the final copies; this repository
 does not contain those credentials.

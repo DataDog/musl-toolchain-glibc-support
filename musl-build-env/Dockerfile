@@ -21,8 +21,8 @@ ARG MUSL_VERSION=1.2.5-r23
 RUN apk --no-cache add \
         "musl=${MUSL_VERSION}" "musl-dev=${MUSL_VERSION}" \
         alpine-sdk bash binutils clang cmake compiler-rt \
-        coreutils git linux-headers lld llvm make \
-        patchelf python3 wget xz && \
+        coreutils git linux-headers lld llvm make openssl-dev \
+        patchelf pcre-dev pcre2-dev perl python3 wget xz zlib-dev && \
     apk info -e "musl=${MUSL_VERSION}" && \
     apk info -e "musl-dev=${MUSL_VERSION}"
 

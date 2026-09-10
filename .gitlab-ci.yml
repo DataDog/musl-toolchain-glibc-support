@@ -350,24 +350,39 @@ resolve-release:
       set -euo pipefail
       command -v docker-credential-ci
 
-      source_tag="${SOURCE_IMAGE}:${CI_COMMIT_SHA}"
-      inspect_file=$(mktemp)
-      trap 'rm -f "${inspect_file}"' EXIT
+      temporary_directory=$(mktemp -d)
+      trap 'rm -rf "${temporary_directory}"' EXIT
 
-      docker buildx imagetools inspect "${source_tag}" \
-        --format '{{json .Manifest}}' > "${inspect_file}"
-      jq -e '
-        (.manifests | length) == 2 and
-        ([.manifests[].platform | [.os, .architecture]] | sort) ==
-          [["linux", "amd64"], ["linux", "arm64"]]
-      ' "${inspect_file}"
+      resolve_release_source() {
+        local -r image="$1"
+        local -r name="$2"
+        local -r variable_prefix="$3"
+        local -r source_tag="${image}:${CI_COMMIT_SHA}"
+        local -r inspect_file="${temporary_directory}/${name}.json"
+        local digest
 
-      digest=$(jq -er '.digest' "${inspect_file}")
-      printf 'RELEASE_DIGEST=%s\n' "${digest}" > release.env
-      printf 'RELEASE_SOURCE=%s@%s\n' \
-        "${SOURCE_IMAGE}" "${digest}" >> release.env
-      printf 'Resolved release source: %s@%s\n' \
-        "${SOURCE_IMAGE}" "${digest}"
+        docker buildx imagetools inspect "${source_tag}" \
+          --format '{{json .Manifest}}' > "${inspect_file}"
+        jq -e '
+          (.manifests | length) == 2 and
+          ([.manifests[].platform | [.os, .architecture]] | sort) ==
+            [["linux", "amd64"], ["linux", "arm64"]]
+        ' "${inspect_file}"
+
+        digest=$(jq -er '.digest' "${inspect_file}")
+        printf '%s_RELEASE_DIGEST=%s\n' \
+          "${variable_prefix}" "${digest}" >> release.env
+        printf '%s_RELEASE_SOURCE=%s@%s\n' \
+          "${variable_prefix}" "${image}" "${digest}" >> release.env
+        printf 'Resolved %s release source: %s@%s\n' \
+          "${name}" "${image}" "${digest}"
+      }
+
+      : > release.env
+      resolve_release_source \
+        "${SOURCE_IMAGE}" musl-build-env MUSL_BUILD_ENV
+      resolve_release_source \
+        "${PHP_SOURCE_IMAGE}" php-buildonly PHP_BUILDONLY
   artifacts:
     reports:
       dotenv: release.env
@@ -390,28 +405,48 @@ scan-release:
   script:
     - |
       set -euo pipefail
-      scan_result=$(mktemp)
-      trap 'rm -f "${scan_result}"' EXIT
+      scan_directory=$(mktemp -d)
+      trap 'rm -rf "${scan_directory}"' EXIT
 
-      ddsign verify "${RELEASE_SOURCE}" --roles ci
-      imageinspector scan \
-        --registry registry.ddbuild.io \
-        --repository ci/musl-toolchain-glibc-support/musl-build-env \
-        --digest "${RELEASE_DIGEST}" \
-        --build-repository DataDog/musl-toolchain-glibc-support \
-        --build-definition-file musl-build-env/Dockerfile \
-        --build-pipeline-url "${CI_PIPELINE_URL}" > "${scan_result}"
+      scan_release_source() {
+        local -r source="$1"
+        local -r digest="$2"
+        local -r repository="$3"
+        local -r dockerfile="$4"
+        local -r name="${repository##*/}"
+        local -r scan_result="${scan_directory}/${name}.json"
 
-      test -s "${scan_result}"
-      if ! jq -e '
-        type == "object" and
-        has("should_block") and
-        (.should_block == false)
-      ' "${scan_result}" > /dev/null; then
-        echo 'imageinspector did not return an explicit non-blocking result' >&2
-        jq . "${scan_result}" || cat "${scan_result}"
-        exit 1
-      fi
+        ddsign verify "${source}" --roles ci
+        imageinspector scan \
+          --registry registry.ddbuild.io \
+          --repository "${repository}" \
+          --digest "${digest}" \
+          --build-repository DataDog/musl-toolchain-glibc-support \
+          --build-definition-file "${dockerfile}" \
+          --build-pipeline-url "${CI_PIPELINE_URL}" > "${scan_result}"
+
+        test -s "${scan_result}"
+        if ! jq -e '
+          type == "object" and
+          has("should_block") and
+          (.should_block == false)
+        ' "${scan_result}" > /dev/null; then
+          echo "imageinspector blocked or returned no result for ${name}" >&2
+          jq . "${scan_result}" || cat "${scan_result}"
+          exit 1
+        fi
+      }
+
+      scan_release_source \
+        "${MUSL_BUILD_ENV_RELEASE_SOURCE}" \
+        "${MUSL_BUILD_ENV_RELEASE_DIGEST}" \
+        ci/musl-toolchain-glibc-support/musl-build-env \
+        musl-build-env/Dockerfile
+      scan_release_source \
+        "${PHP_BUILDONLY_RELEASE_SOURCE}" \
+        "${PHP_BUILDONLY_RELEASE_DIGEST}" \
+        ci/musl-toolchain-glibc-support/php-buildonly \
+        php-buildonly/Dockerfile
 
 publish-release:
   extends: .release-rules
@@ -425,7 +460,7 @@ publish-release:
     - job: scan-release
       artifacts: false
   resource_group: musl-build-env-publication
-  timeout: 75m
+  timeout: 135m
   variables:
     KUBERNETES_SERVICE_ACCOUNT_OVERWRITE: musl-toolchain-glibc-support
     KUBERNETES_POD_ANNOTATIONS_1: >-
@@ -437,52 +472,85 @@ publish-release:
   script:
     - |
       set -euo pipefail
-      tag_response=$(mktemp)
-      trap 'rm -f "${tag_response}"' EXIT
+      temporary_directory=$(mktemp -d)
+      trap 'rm -rf "${temporary_directory}"' EXIT
 
-      status=$(
-        curl -sS --output "${tag_response}" \
-          --write-out '%{http_code}' \
-          "https://hub.docker.com/v2/repositories/datadog/musl-build-env/tags/${CI_COMMIT_TAG}"
-      )
+      check_public_version() {
+        local -r image="$1"
+        local -r release_digest="$2"
+        local -r tag_response="${temporary_directory}/${image}-tag.json"
+        local status
+        local public_digest
 
-      case "${status}" in
-        200)
-          public_digest=$(
-            perl -MJSON::PP -0777 \
-              -ne 'print decode_json($_)->{"digest"}' "${tag_response}"
-          )
-          test -n "${public_digest}"
-          if [ "${public_digest}" != "${RELEASE_DIGEST}" ]; then
-            echo "Refusing to overwrite musl-build-env:${CI_COMMIT_TAG}" >&2
-            echo "Docker Hub digest: ${public_digest}" >&2
-            echo "Release digest:    ${RELEASE_DIGEST}" >&2
+        status=$(
+          curl -sS --output "${tag_response}" \
+            --write-out '%{http_code}' \
+            "https://hub.docker.com/v2/repositories/datadog/${image}/tags/${CI_COMMIT_TAG}"
+        )
+
+        case "${status}" in
+          200)
+            public_digest=$(
+              perl -MJSON::PP -0777 \
+                -ne 'print decode_json($_)->{"digest"}' "${tag_response}"
+            )
+            test -n "${public_digest}"
+            if [ "${public_digest}" != "${release_digest}" ]; then
+              echo "Refusing to overwrite ${image}:${CI_COMMIT_TAG}" >&2
+              echo "Docker Hub digest: ${public_digest}" >&2
+              echo "Release digest:    ${release_digest}" >&2
+              exit 1
+            fi
+            ;;
+          404)
+            ;;
+          *)
+            echo "Docker Hub preflight for ${image} returned HTTP ${status}" >&2
+            cat "${tag_response}" >&2
             exit 1
-          fi
-          ;;
-        404)
-          ;;
-        *)
-          echo "Docker Hub preflight returned HTTP ${status}" >&2
-          cat "${tag_response}" >&2
-          exit 1
-          ;;
-      esac
+            ;;
+        esac
+      }
+
+      publish_version() {
+        local -r registries="$1"
+        local -r source="$2"
+        local -r image="$3"
+
+        dd-pkg publish-image \
+          --timeout "${PUBLIC_IMAGES_PUBLISH_TIMEOUT}" \
+          --poll-interval 30 \
+          --registries "${registries}" \
+          --sources "${source}" \
+          --destinations "${image}:${CI_COMMIT_TAG}" \
+          --merge-strategy none \
+          --signing=false
+      }
+
+      publish_latest() {
+        local -r registries="$1"
+        local -r image="$2"
+
+        dd-pkg publish-image \
+          --timeout "${PUBLIC_IMAGES_PUBLISH_TIMEOUT}" \
+          --poll-interval 30 \
+          --registries "${registries}" \
+          --tag-reference "${image}:${CI_COMMIT_TAG}" \
+          --new-tags latest \
+          --signing=false
+      }
+
+      check_public_version \
+        musl-build-env "${MUSL_BUILD_ENV_RELEASE_DIGEST}"
+      check_public_version \
+        php-buildonly "${PHP_BUILDONLY_RELEASE_DIGEST}"
 
       dd-pkg version
-      dd-pkg publish-image \
-        --timeout "${PUBLIC_IMAGES_PUBLISH_TIMEOUT}" \
-        --poll-interval 30 \
-        --registries public \
-        --sources "${RELEASE_SOURCE}" \
-        --destinations "musl-build-env:${CI_COMMIT_TAG}" \
-        --merge-strategy none \
-        --signing=false
+      publish_version \
+        public "${MUSL_BUILD_ENV_RELEASE_SOURCE}" musl-build-env
+      publish_version \
+        dockerhub "${PHP_BUILDONLY_RELEASE_SOURCE}" php-buildonly
 
-      dd-pkg publish-image \
-        --timeout "${PUBLIC_IMAGES_PUBLISH_TIMEOUT}" \
-        --poll-interval 30 \
-        --registries public \
-        --tag-reference "musl-build-env:${CI_COMMIT_TAG}" \
-        --new-tags latest \
-        --signing=false
+      # Do not advance either mutable alias until both immutable versions exist.
+      publish_latest public musl-build-env
+      publish_latest dockerhub php-buildonly

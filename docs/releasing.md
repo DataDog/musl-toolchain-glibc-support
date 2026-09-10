@@ -1,4 +1,4 @@
-# Releasing `musl-build-env`
+# Releasing the toolchain images
 
 ## Prerequisites
 
@@ -6,7 +6,7 @@ Before creating a release tag, confirm that:
 
 - the intended commit is merged into protected `main`;
 - its protected-main pipeline passed the complete amd64 and arm64 matrix;
-- the pipeline pushed and signed the commit-addressed internal OCI index;
+- the pipeline pushed and signed both commit-addressed internal OCI indexes;
 - the project identity is authorized by Image Integrity;
 - the project, product, production target, and releasing maintainer are
   authorized by Artifact Gateway; and
@@ -26,25 +26,28 @@ release; there is no manual publication job.
 
 The tag pipeline:
 
-1. resolves the existing internal index for the tagged commit without
-   rebuilding it;
-2. verifies its Image Integrity signature and exact amd64/arm64 platform set;
-3. scans the immutable digest with `imageinspector` and fails if the centralized
-   result blocks publication;
-4. checks Docker Hub for a conflicting version tag;
-5. invokes `dd-pkg publish-image` for the logical `public` registry group; and
-6. after version publication succeeds, retags that public version as `latest`.
+1. resolves both existing internal indexes for the tagged commit without
+   rebuilding them;
+2. verifies their Image Integrity signatures and exact amd64/arm64 platform
+   sets;
+3. scans both immutable digests with `imageinspector` and fails if either
+   centralized result blocks publication;
+4. checks Docker Hub for conflicting version tags for either image;
+5. publishes `musl-build-env` to the logical `public` registry group and
+   `php-buildonly` only to the logical `dockerhub` registry; and
+6. after both version publications succeed, retags both public versions as
+   `latest` in their respective registry sets.
 
-A pipeline retry is safe when Docker Hub's existing version tag points to the
-same digest. A different digest is a hard failure and must not be overwritten.
-Successful completion of the Artifact Gateway-triggered `public-images` job is
-the publication success criterion.
+A pipeline retry is safe when each existing Docker Hub version tag points to
+the corresponding internal digest. A different digest is a hard failure and
+must not be overwritten. Successful completion of every Artifact
+Gateway-triggered `public-images` job is the publication success criterion.
 
 ## Failure and rollback
 
 - Stop further publication while a release failure is investigated.
 - Never overwrite or move a version tag.
 - Publish corrected content under a new patch version.
-- Do not advance `latest` when version publication fails.
+- Do not advance either `latest` alias when a version publication fails.
 - If a bad release advanced `latest`, restore the alias to a previously
   successful version through the same serialized Artifact Gateway flow.
