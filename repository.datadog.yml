@@ -1,0 +1,6 @@
+---
+schema-version: v1
+kind: mergegate
+rules:
+  - require: reviewers-approval
+    enforcement: active
