@@ -14,11 +14,11 @@ The harness requires Docker and Java 17 or newer.
 
 ## Gradle verification
 
-The wrapper pins the Gradle 9.6.1 binary distribution checksum. Dependency
+The wrapper pins the Gradle 9.7.1 binary distribution checksum. Dependency
 locking fixes the resolved test graph, and `gradle/verification-metadata.xml`
 checks the SHA-256 of both dependency artifacts and metadata. The root
 Makefile's `lint-gradle` target also checks the committed wrapper JAR against
-Gradle's published 9.6.1 wrapper checksum before executing it.
+Gradle's published 9.7.1 wrapper checksum before executing it.
 
 After an intentional dependency update, refresh the lock state and verification
 metadata, then review every changed component and checksum. Gradle merges
@@ -35,9 +35,9 @@ When updating Gradle itself, obtain the new checksums from Gradle's official
 checksum reference and regenerate the wrapper with the reviewed distribution:
 
 ```sh
-./gradlew wrapper --gradle-version 9.6.1 --distribution-type bin \
+./gradlew wrapper --gradle-version 9.7.1 --distribution-type bin \
   --gradle-distribution-sha256-sum \
-  9c0f7faeeb306cb14e4279a3e084ca6b596894089a0638e68a07c945a32c9e14
+  acd53f1edaf02f1a8ff99879f8a34b302661a057d9b063ae9e35b552f804d20a
 make -C .. lint-gradle
 ```
 
