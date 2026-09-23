@@ -83,7 +83,7 @@ variables:
       apt-get update
       DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         'make=4.3-4.1build2' \
-        'openjdk-17-jre-headless=17.0.20+8-1~24.04'
+        'openjdk-17-jre-headless'
       rm -rf /var/lib/apt/lists/*
       export ORG_GRADLE_PROJECT_mavenRepositoryProxy="${MAVEN_REPOSITORY_PROXY}"
       docker --version
