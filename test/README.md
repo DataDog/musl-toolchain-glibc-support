@@ -227,7 +227,7 @@ Select all three categories by package. They need only the build and musl
 images:
 
 ```sh
-./gradlew test --tests 'org.cataphract.musl.sanitizer.*' \
+./gradlew test --tests 'com.datadoghg.musl.sanitizer.*' \
   -PbuildEnvImage=musl-build-env:latest \
   -PmuslImage=alpine:3.24
 ```

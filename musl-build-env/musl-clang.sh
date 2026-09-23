@@ -58,8 +58,12 @@ done
 if $compile_only; then
     cxx_compile_flags=("${cxx_header_flags[@]}")
     if $cxx && ! $sanitized_cxx; then
-        # Without an explicit header root, -stdlib selects libc++ headers.
-        cxx_compile_flags=("${cxx_link_flags[@]}")
+        # -stdlib=libc++ has two functions 1) include the libc++ headers and 2)
+        # its libraries. In sanitized compile-only builds, we pass
+        # -stdlib++-isystem, and there is no linking to do, so -stdlibc=libc++
+        # is not consumed and errors with -Werror. But in non-sanitized builds,
+        # we can add it to include the libc++ headers.
+        cxx_compile_flags=(-stdlib=libc++)
     fi
     exec "$driver" \
         "${common_flags[@]}" \
@@ -68,11 +72,13 @@ if $compile_only; then
         "$@"
 fi
 
-# For ASan and MSan, the selected library directory goes first on every link,
-# C and C++ alike. Its reduced libc.so omits wrappers that override weak
-# interceptors and selects only the libc facade for native-musl execution.
+# ASan/MSan links search /usr/{asan,msan}/lib before /usr/lib. Their libc.so
+# linker scripts omit libglibc_compat.a so its strong wrappers cannot replace
+# compiler-rt's weak interceptors. Native-musl sanitizer binaries need only the
+# libc.so.6 facade, not the pthread/rt/m/dl/util compatibility facades (running
+# instrumented binaries in glibc is a non-goal).
 #
-# Only this policy setting drives the choice; explicit -fsanitize=address or
+# Only MUSL_CLANG_SANITIZE drives the choice; explicit -fsanitize=address or
 # -fsanitize=memory arguments are deliberately not inspected.
 
 # In sanitized C++ mode, omit explicit runtime libraries supplied by build
@@ -106,9 +112,9 @@ if $sanitized_cxx; then
     link_args=("${filtered_args[@]}")
 fi
 
-# An explicit split-library option is also a runtime-selection request. On
-# glibc before 2.34, putting that library before libc preserves the requested
-# library selection even when libc exports the same symbols.
+# glibc has symbols overlapping in libc and, say, libpthread or libm, and these
+# have different definitions in each. Consequently, we must honour requests to
+# explicitly link the split libraries.
 pthread_driver_flag=false
 pthread_library_flag=false
 math_library_flag=false
