@@ -61,7 +61,7 @@ if(_musl_sanitizer_root)
     set(_musl_sanitizer_runtime
         "-L${_musl_sanitizer_root}/lib -Wl,-rpath,${_musl_sanitizer_root}/lib")
     set(_musl_sanitizer_headers
-        "-nostdinc++ -isystem ${_musl_sanitizer_root}/include/c++/v1")
+        "-stdlib++-isystem ${_musl_sanitizer_root}/include/c++/v1")
 else()
     set(_musl_sanitizer_runtime "")
     set(_musl_sanitizer_headers "")

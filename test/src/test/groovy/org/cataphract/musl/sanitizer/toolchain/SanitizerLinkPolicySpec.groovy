@@ -37,6 +37,9 @@ class SanitizerLinkPolicySpec extends MuslSanitizerSpecification {
         harness.copyResourceToBuildEnvironment(
             'samples/downstream_compat_probe.c', "${WORK_DIRECTORY}/probe.c")
         harness.copyResourceToBuildEnvironment(
+            'samples/executable-constructors.cpp',
+            "${WORK_DIRECTORY}/probe.cpp")
+        harness.copyResourceToBuildEnvironment(
             'samples/sanitizer_policy_CMakeLists.txt',
             "${WORK_DIRECTORY}/CMakeLists.txt")
 
@@ -112,6 +115,33 @@ class SanitizerLinkPolicySpec extends MuslSanitizerSpecification {
         'ASan'    | ASAN_POLICY | ASAN_DIRECTORY | 'C++'    | 'musl-clang++'
         'MSan'    | MSAN_POLICY | MSAN_DIRECTORY | 'C'      | 'musl-clang'
         'MSan'    | MSAN_POLICY | MSAN_DIRECTORY | 'C++'    | 'musl-clang++'
+    }
+
+    @Unroll
+    def '#sanitizer wrapper supports separate C++ compilation and linking'() {
+        given:
+        installSanitizerPolicy(policy)
+        String suffix = UUID.randomUUID()
+        String objectFile = "${WORK_DIRECTORY}/probe-${suffix}.o"
+        String executable = "${WORK_DIRECTORY}/probe-${suffix}"
+
+        when:
+        Container.ExecResult compilation = harness.buildEnvironmentCommand([
+            'musl-clang++', '-Werror', '-c',
+            "${WORK_DIRECTORY}/probe.cpp".toString(), '-o', objectFile,
+        ])
+        Container.ExecResult link = harness.buildEnvironmentCommand([
+            'musl-clang++', '-Werror', objectFile, '-o', executable,
+        ])
+
+        then:
+        compilation.exitCode == 0
+        link.exitCode == 0
+
+        where:
+        sanitizer | policy
+        'ASan'    | ASAN_POLICY
+        'MSan'    | MSAN_POLICY
     }
 
     @Unroll

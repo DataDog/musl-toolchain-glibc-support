@@ -21,8 +21,10 @@ if [[ -r /etc/musl-clang.conf ]]; then
 fi
 
 common_flags=(-fno-omit-frame-pointer)
+cxx_header_flags=()
+cxx_link_flags=()
 if $cxx; then
-    common_flags+=(-stdlib=libc++)
+    cxx_link_flags=(-stdlib=libc++)
 fi
 
 sanitizer_root=
@@ -36,10 +38,8 @@ if [[ -n $sanitizer_root ]]; then
     sanitizer_lib_dir="$sanitizer_root/lib"
     if $cxx; then
         sanitized_cxx=true
-        common_flags+=(
-            -nostdinc++
-            -isystem "$sanitizer_root/include/c++/v1"
-        )
+        cxx_header_flags=(
+            -stdlib++-isystem "$sanitizer_root/include/c++/v1")
     fi
 fi
 
@@ -56,8 +56,14 @@ for arg in "$@"; do
 done
 
 if $compile_only; then
+    cxx_compile_flags=("${cxx_header_flags[@]}")
+    if $cxx && ! $sanitized_cxx; then
+        # Without an explicit header root, -stdlib selects libc++ headers.
+        cxx_compile_flags=("${cxx_link_flags[@]}")
+    fi
     exec "$driver" \
         "${common_flags[@]}" \
+        "${cxx_compile_flags[@]}" \
         "${MUSL_CLANG_COMPILE_FLAGS[@]}" \
         "$@"
 fi
@@ -227,6 +233,8 @@ fi
 # Clang emits its implicit compiler runtimes and dynamic libc.
 exec "$driver" \
     "${common_flags[@]}" \
+    "${cxx_header_flags[@]}" \
+    "${cxx_link_flags[@]}" \
     "${MUSL_CLANG_COMPILE_FLAGS[@]}" \
     "${runtime_selection_flags[@]}" \
     -Wl,--gc-sections \
