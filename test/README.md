@@ -119,10 +119,10 @@ non-goal. Sanitizer binaries are supported and tested only on native musl.
 option. Derived images set it in `/etc/musl-clang.conf`, which is sourced by
 the `musl-clang` wrappers and the native CMake toolchain. Supported values are:
 
-| Value | Library directory | C++ runtime |
+| Value | C++ root | C++ runtime |
 | --- | --- | --- |
-| `address` | `/usr/asan/lib` | ASan-instrumented shared DSOs |
-| `memory` | `/usr/msan/lib` | MSan-instrumented libc++ and libc++abi |
+| `address` | `/usr/asan` | ASan-instrumented shared DSOs and headers |
+| `memory` | `/usr/msan` | MSan-instrumented shared DSOs and headers |
 
 For every C and C++ link, the selected value adds its directory to the library
 search path and runtime search path. This selects the reduced sanitizer
@@ -132,6 +132,10 @@ in place of the plain static archives. The MSan `libc++` and `libc++abi` are
 instrumented because uninstrumented standard library code reports as
 uninitialized; its `libunwind` is intentionally uninstrumented so sanitizer
 reporting cannot recurse through the unwinder.
+
+For every C++ compile, the policy also replaces the default libc++ include path
+with the matching `<root>/include/c++/v1` directory. Sanitizer-specific inline
+code in those headers must match the selected shared library.
 
 The setting does **not** enable sanitizer instrumentation. Compile and link
 flags remain explicit and normally live in the same configuration file:
@@ -166,7 +170,8 @@ MUSL_CLANG_LINK_FLAGS=(
 Conversely, passing `-fsanitize=address` or `-fsanitize=memory` by itself does
 not make the wrapper infer this policy. A derived sanitizer image should set
 `MUSL_CLANG_SANITIZE`; a one-off link must select `/usr/asan/lib` or
-`/usr/msan/lib` explicitly if no policy is installed.
+`/usr/msan/lib` and the matching C++ headers explicitly if no policy is
+installed.
 
 #### Why ASan and MSan require selection
 
@@ -206,8 +211,9 @@ There are three intentionally separate sanitizer test categories:
 
 - Normal tests verify that ASan, LSan, and MSan operate without false positives
   or runtime failures. These include the regression tests for the local
-  compiler-rt patches and a C++ program that MSan only accepts when it links the
-  instrumented standard library.
+  compiler-rt patches, a C++ program that MSan only accepts when it links the
+  instrumented standard library, and an ASan/UBSan C++ program that requires
+  matching libc++ headers and shared libraries.
 - Detection tests trigger deliberate memory and undefined-behavior bugs and
   verify that ASan, LSan, MSan, and UBSan produce the expected reports and
   nonzero exits.

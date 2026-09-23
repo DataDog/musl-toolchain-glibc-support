@@ -25,6 +25,24 @@ if $cxx; then
     common_flags+=(-stdlib=libc++)
 fi
 
+sanitizer_root=
+sanitizer_lib_dir=
+sanitized_cxx=false
+case "${MUSL_CLANG_SANITIZE:-}" in
+    *address*) sanitizer_root=/usr/asan ;;
+    *memory*) sanitizer_root=/usr/msan ;;
+esac
+if [[ -n $sanitizer_root ]]; then
+    sanitizer_lib_dir="$sanitizer_root/lib"
+    if $cxx; then
+        sanitized_cxx=true
+        common_flags+=(
+            -nostdinc++
+            -isystem "$sanitizer_root/include/c++/v1"
+        )
+    fi
+fi
+
 # Do not pass link-only policy to dependency generation, preprocessing,
 # assembly, syntax checks, or object compilation.
 compile_only=false
@@ -50,18 +68,6 @@ fi
 #
 # Only this policy setting drives the choice; explicit -fsanitize=address or
 # -fsanitize=memory arguments are deliberately not inspected.
-sanitizer_lib_dir=
-sanitized_cxx=false
-case "${MUSL_CLANG_SANITIZE:-}" in
-    *address*)
-        sanitizer_lib_dir=/usr/asan/lib
-        $cxx && sanitized_cxx=true
-        ;;
-    *memory*)
-        sanitizer_lib_dir=/usr/msan/lib
-        $cxx && sanitized_cxx=true
-        ;;
-esac
 
 # In sanitized C++ mode, omit explicit runtime libraries supplied by build
 # systems. Clang's implicit -lc++ will resolve to the sanitizer directory, and

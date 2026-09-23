@@ -6,6 +6,13 @@
 
 #include <stdio.h>
 
+#if defined(__cplusplus) && __has_feature(address_sanitizer)
+#  include <__config_site>
+#  if !_LIBCPP_INSTRUMENTED_WITH_ASAN
+#    error "ASan C++ builds require the matching libc++ headers"
+#  endif
+#endif
+
 /* clang++ compiles a .c input as C++, so the same source drives both tests. */
 #ifdef __cplusplus
 extern "C"

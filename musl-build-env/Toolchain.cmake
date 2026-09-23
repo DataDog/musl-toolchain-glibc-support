@@ -48,25 +48,31 @@ endif()
 #
 # As in the wrappers, only MUSL_SANITIZE drives this selection; explicit
 # -fsanitize=address or -fsanitize=memory flags do not.
-set(_musl_sanitizer_lib_dir "")
+set(_musl_sanitizer_root "")
 set(_musl_cxx_runtime "-static-libstdc++")
 if(MUSL_SANITIZE MATCHES "address")
-    set(_musl_sanitizer_lib_dir "/usr/asan/lib")
+    set(_musl_sanitizer_root "/usr/asan")
     set(_musl_cxx_runtime "")
 elseif(MUSL_SANITIZE MATCHES "memory")
-    set(_musl_sanitizer_lib_dir "/usr/msan/lib")
+    set(_musl_sanitizer_root "/usr/msan")
     set(_musl_cxx_runtime "")
 endif()
-if(_musl_sanitizer_lib_dir)
+if(_musl_sanitizer_root)
     set(_musl_sanitizer_runtime
-        "-L${_musl_sanitizer_lib_dir} -Wl,-rpath,${_musl_sanitizer_lib_dir}")
+        "-L${_musl_sanitizer_root}/lib -Wl,-rpath,${_musl_sanitizer_root}/lib")
+    set(_musl_sanitizer_headers
+        "-nostdinc++ -isystem ${_musl_sanitizer_root}/include/c++/v1")
 else()
     set(_musl_sanitizer_runtime "")
+    set(_musl_sanitizer_headers "")
 endif()
 set(CMAKE_C_FLAGS_INIT
     "${_musl_sanitizer_runtime} -fno-omit-frame-pointer -Qunused-arguments ${MUSL_COMPILE_FLAGS}")
-set(CMAKE_CXX_FLAGS_INIT
-    "-stdlib=libc++ ${_musl_sanitizer_runtime} ${_musl_cxx_runtime} -fno-omit-frame-pointer -Qunused-arguments ${MUSL_COMPILE_FLAGS}")
+string(CONCAT _musl_cxx_flags
+    "-stdlib=libc++ ${_musl_sanitizer_runtime} "
+    "${_musl_sanitizer_headers} ${_musl_cxx_runtime} "
+    "-fno-omit-frame-pointer -Qunused-arguments ${MUSL_COMPILE_FLAGS}")
+set(CMAKE_CXX_FLAGS_INIT "${_musl_cxx_flags}")
 
 # Prefer static user libraries, then restore dynamic mode before Clang adds its
 # implicit compiler runtimes and libc. libc.so injects compatibility archives
