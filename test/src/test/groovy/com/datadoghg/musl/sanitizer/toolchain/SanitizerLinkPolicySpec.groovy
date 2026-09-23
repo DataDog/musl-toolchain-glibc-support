@@ -1,5 +1,6 @@
 package com.datadoghg.musl.sanitizer.toolchain
 
+import com.datadoghg.musl.sanitizer.MuslSanitizerProgram
 import com.datadoghg.musl.sanitizer.MuslSanitizerSpecification
 import org.testcontainers.containers.Container
 import spock.lang.Unroll
@@ -142,6 +143,56 @@ class SanitizerLinkPolicySpec extends MuslSanitizerSpecification {
         sanitizer | policy
         'ASan'    | ASAN_POLICY
         'MSan'    | MSAN_POLICY
+    }
+
+    @Unroll
+    def '#sanitizer C wrapper links the C++ ABI only when requested'() {
+        given:
+        installSanitizerPolicy(policy)
+
+        when:
+        Container.ExecResult plainLink = linkProbe('musl-clang', [])
+        Container.ExecResult cxxRuntimeLink = linkProbe(
+            'musl-clang', ['-fsanitize-link-c++-runtime'])
+        String plainTrace = linkerTrace(plainLink)
+        String cxxRuntimeTrace = linkerTrace(cxxRuntimeLink)
+
+        then:
+        plainLink.exitCode == 0
+        cxxRuntimeLink.exitCode == 0
+        !plainTrace.contains("${directory}/libc++abi.so")
+        cxxRuntimeTrace.contains("${directory}/libc++abi.so")
+        !cxxRuntimeTrace.contains('/usr/lib/libc++abi.a')
+
+        where:
+        sanitizer | policy      | directory
+        'ASan'    | ASAN_POLICY | ASAN_DIRECTORY
+        'MSan'    | MSAN_POLICY | MSAN_DIRECTORY
+    }
+
+    def 'ASan C executable loads an instrumented C++ DSO'() {
+        given:
+        installSanitizerPolicy(ASAN_POLICY)
+        List<String> sanitizerArguments = [
+            '-O1', '-g', '-fsanitize=address,undefined,vptr',
+            '-fno-sanitize=function',
+        ]
+
+        when:
+        MuslSanitizerProgram program =
+            harness.compileCWithCppSharedLibrary(
+                'samples/sanitizer_cxx_dso_loader.c',
+                'samples/sanitizer_cxx_dso.cpp',
+                sanitizerArguments + ['-fsanitize-link-c++-runtime'],
+                sanitizerArguments)
+        Container.ExecResult result = harness.run(
+            program, [], ['UBSAN_OPTIONS': 'halt_on_error=1'])
+
+        then:
+        result.exitCode == 0
+        result.stdout.trim() == 'sanitizer-cxx-dso-ok'
+        program.runtimeLibraries.keySet().containsAll(
+            ['libc++.so.1', 'libc++abi.so.1', 'libunwind.so.1'])
     }
 
     @Unroll

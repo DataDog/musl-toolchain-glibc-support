@@ -64,6 +64,17 @@ final class MuslSanitizerTestHarness implements Closeable {
             sharedLibraryCompilerArguments: sharedLibraryCompilerArguments)
     }
 
+    MuslSanitizerProgram compileCWithCppSharedLibrary(
+        String classpathResource, String sharedLibraryResource,
+        List<String> compilerArguments = [],
+        List<String> sharedLibraryCompilerArguments = []) {
+        return compile(
+            resource: classpathResource, compilerArguments: compilerArguments,
+            sharedLibraryResource: sharedLibraryResource,
+            sharedLibraryCompiler: 'musl-clang++',
+            sharedLibraryCompilerArguments: sharedLibraryCompilerArguments)
+    }
+
     /**
      * Runs a command in the build container. Specs use this to stage toolchain
      * state that the link line is expected to pick up on its own, such as the
@@ -150,6 +161,8 @@ final class MuslSanitizerTestHarness implements Closeable {
         List<String> compilerArguments =
             (List<String>) (options.compilerArguments ?: [])
         String sharedLibraryResource = (String) options.sharedLibraryResource
+        String sharedLibraryCompiler =
+            (String) (options.sharedLibraryCompiler ?: compiler)
         List<String> sharedLibraryCompilerArguments =
             (List<String>) (options.sharedLibraryCompilerArguments ?: [])
 
@@ -172,11 +185,14 @@ final class MuslSanitizerTestHarness implements Closeable {
         Path hostSharedLibrary = null
         List<String> sharedLibraryDependencies = null
         if (sharedLibraryResource != null) {
+            String sharedLibraryExtension =
+                sharedLibraryResource.endsWith('.cpp') ? '.cpp' : '.c'
             Path hostSharedLibrarySource =
-                transferDirectory.resolve("${id}-module.c")
+                transferDirectory.resolve(
+                    "${id}-module${sharedLibraryExtension}")
             copyResource(sharedLibraryResource, hostSharedLibrarySource)
             String containerSharedLibrarySource =
-                "${containerDirectory}/module.c"
+                "${containerDirectory}/module${sharedLibraryExtension}"
             String containerSharedLibrary =
                 "${containerDirectory}/module.so"
             buildContainer.copyFileToContainer(
@@ -184,7 +200,7 @@ final class MuslSanitizerTestHarness implements Closeable {
                 containerSharedLibrarySource)
 
             List<String> sharedCommand = [
-                compiler, containerSharedLibrarySource,
+                sharedLibraryCompiler, containerSharedLibrarySource,
                 '-shared', '-fPIC', '-Wl,-soname,musl-sanitizer-module.so',
                 "-L${libraryDirectory}".toString(),
                 '-Wl,-t',

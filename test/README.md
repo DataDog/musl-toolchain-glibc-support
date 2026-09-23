@@ -137,6 +137,11 @@ For every C++ compile, the policy also replaces the default libc++ include path
 with the matching `<root>/include/c++/v1` directory. Sanitizer-specific inline
 code in those headers must match the selected shared library.
 
+When a dynamic `musl-clang` C executable requests
+`-fsanitize-link-c++-runtime`, the wrapper also links the matching shared
+`libc++abi`. The requested C++ sanitizer archives need that ABI, but the C
+driver does not add it.
+
 The setting does **not** enable sanitizer instrumentation. Compile and link
 flags remain explicit and normally live in the same configuration file:
 

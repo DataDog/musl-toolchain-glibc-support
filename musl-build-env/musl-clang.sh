@@ -118,8 +118,10 @@ fi
 pthread_driver_flag=false
 pthread_library_flag=false
 math_library_flag=false
+link_cxx_sanitizer_runtime=false
 default_libraries=true
 dynamic_output=true
+shared_output=false
 previous_was_l=false
 link_options=(
     "${MUSL_CLANG_COMPILE_FLAGS[@]}"
@@ -148,8 +150,17 @@ for arg in "${link_options[@]}"; do
         -lm)
             math_library_flag=true
             ;;
+        -fsanitize-link-c++-runtime)
+            link_cxx_sanitizer_runtime=true
+            ;;
+        -fno-sanitize-link-c++-runtime)
+            link_cxx_sanitizer_runtime=false
+            ;;
         -nostdlib|-nodefaultlibs)
             default_libraries=false
+            ;;
+        -shared)
+            shared_output=true
             ;;
         -static|-static-pie|-r|-Wl,-r|-Wl,-r,*|-Wl,--relocatable|\
         -Wl,--relocatable,*)
@@ -234,6 +245,26 @@ if $cxx && ! $sanitized_cxx; then
     cxx_runtime_flags=(-static-libstdc++)
 fi
 
+# A C executable can request the C++ sanitizer archives (it may load C++ DSOs).
+# They need the matching shared C++ ABI, which the C driver does not add.
+# However, -fsanitize-link-c++-runtime is effectively a no-op when -shared is
+# passed (libclang_rt.asan_cxx.a and libclang_rt.ubsan_standalone_cxx.a are not
+# linked into the DSO, so we don't need to link libc++abi either)
+c_sanitizer_abi_flags=()
+if ! $cxx &&
+   [[ -n $sanitizer_root ]] &&
+   $link_cxx_sanitizer_runtime &&
+   $default_libraries &&
+   $dynamic_output &&
+   ! $shared_output; then
+    c_sanitizer_abi_flags=(
+        -Wl,--push-state
+        -Wl,-Bdynamic
+        -lc++abi
+        -Wl,--pop-state
+    )
+fi
+
 # Start user-specified libraries in static mode, while allowing an explicit
 # -Bdynamic from the caller to override that preference. Pop the state before
 # Clang emits its implicit compiler runtimes and dynamic libc.
@@ -251,6 +282,7 @@ exec "$driver" \
     -Wl,-Bstatic \
     "${link_args[@]}" \
     -Wl,--pop-state \
+    "${c_sanitizer_abi_flags[@]}" \
     "${MUSL_CLANG_LINK_FLAGS[@]}" \
     "${pthread_link_flags[@]}" \
     "${math_link_flags[@]}"
