@@ -27,6 +27,16 @@ if $cxx; then
     cxx_link_flags=(-stdlib=libc++)
 fi
 
+# ASan/MSan links search /usr/{asan,msan}/lib before /usr/lib. Their libc.so
+# linker scripts omit libglibc_compat.a so its strong wrappers cannot replace
+# compiler-rt's weak interceptors. Native-musl sanitizer binaries need only the
+# libc.so.6 facade, not the pthread/rt/m/dl/util compatibility facades (running
+# instrumented binaries in glibc is a non-goal).
+#
+# Only MUSL_CLANG_SANITIZE drives the choice; explicit -fsanitize=address or
+# -fsanitize=memory arguments are deliberately not inspected. They are also not
+# automatically added, since the user might want to disable some sanitizers for
+# his own code.
 sanitizer_root=
 sanitizer_lib_dir=
 sanitized_cxx=false
@@ -71,15 +81,6 @@ if $compile_only; then
         "${MUSL_CLANG_COMPILE_FLAGS[@]}" \
         "$@"
 fi
-
-# ASan/MSan links search /usr/{asan,msan}/lib before /usr/lib. Their libc.so
-# linker scripts omit libglibc_compat.a so its strong wrappers cannot replace
-# compiler-rt's weak interceptors. Native-musl sanitizer binaries need only the
-# libc.so.6 facade, not the pthread/rt/m/dl/util compatibility facades (running
-# instrumented binaries in glibc is a non-goal).
-#
-# Only MUSL_CLANG_SANITIZE drives the choice; explicit -fsanitize=address or
-# -fsanitize=memory arguments are deliberately not inspected.
 
 # In sanitized C++ mode, omit explicit runtime libraries supplied by build
 # systems. Clang's implicit -lc++ will resolve to the sanitizer directory, and
