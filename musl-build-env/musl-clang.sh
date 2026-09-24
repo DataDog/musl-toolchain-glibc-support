@@ -21,8 +21,36 @@ if [[ -r /etc/musl-clang.conf ]]; then
 fi
 
 common_flags=(-fno-omit-frame-pointer)
+cxx_header_flags=()
+cxx_link_flags=()
 if $cxx; then
-    common_flags+=(-stdlib=libc++)
+    cxx_link_flags=(-stdlib=libc++)
+fi
+
+# ASan/MSan links search /usr/{asan,msan}/lib before /usr/lib. Their libc.so
+# linker scripts omit libglibc_compat.a so its strong wrappers cannot replace
+# compiler-rt's weak interceptors. Native-musl sanitizer binaries need only the
+# libc.so.6 facade, not the pthread/rt/m/dl/util compatibility facades (running
+# instrumented binaries in glibc is a non-goal).
+#
+# Only MUSL_CLANG_SANITIZE drives the choice; explicit -fsanitize=address or
+# -fsanitize=memory arguments are deliberately not inspected. They are also not
+# automatically added, since the user might want to disable some sanitizers for
+# his own code.
+sanitizer_root=
+sanitizer_lib_dir=
+sanitized_cxx=false
+case "${MUSL_CLANG_SANITIZE:-}" in
+    *address*) sanitizer_root=/usr/asan ;;
+    *memory*) sanitizer_root=/usr/msan ;;
+esac
+if [[ -n $sanitizer_root ]]; then
+    sanitizer_lib_dir="$sanitizer_root/lib"
+    if $cxx; then
+        sanitized_cxx=true
+        cxx_header_flags=(
+            -stdlib++-isystem "$sanitizer_root/include/c++/v1")
+    fi
 fi
 
 # Do not pass link-only policy to dependency generation, preprocessing,
@@ -38,30 +66,21 @@ for arg in "$@"; do
 done
 
 if $compile_only; then
+    cxx_compile_flags=("${cxx_header_flags[@]}")
+    if $cxx && ! $sanitized_cxx; then
+        # -stdlib=libc++ has two functions 1) include the libc++ headers and 2)
+        # its libraries. In sanitized compile-only builds, we pass
+        # -stdlib++-isystem, and there is no linking to do, so -stdlibc=libc++
+        # is not consumed and errors with -Werror. But in non-sanitized builds,
+        # we can add it to include the libc++ headers.
+        cxx_compile_flags=(-stdlib=libc++)
+    fi
     exec "$driver" \
         "${common_flags[@]}" \
+        "${cxx_compile_flags[@]}" \
         "${MUSL_CLANG_COMPILE_FLAGS[@]}" \
         "$@"
 fi
-
-# For ASan and MSan, the selected library directory goes first on every link,
-# C and C++ alike. Its reduced libc.so omits wrappers that override weak
-# interceptors and selects only the libc facade for native-musl execution.
-#
-# Only this policy setting drives the choice; explicit -fsanitize=address or
-# -fsanitize=memory arguments are deliberately not inspected.
-sanitizer_lib_dir=
-sanitized_cxx=false
-case "${MUSL_CLANG_SANITIZE:-}" in
-    *address*)
-        sanitizer_lib_dir=/usr/asan/lib
-        $cxx && sanitized_cxx=true
-        ;;
-    *memory*)
-        sanitizer_lib_dir=/usr/msan/lib
-        $cxx && sanitized_cxx=true
-        ;;
-esac
 
 # In sanitized C++ mode, omit explicit runtime libraries supplied by build
 # systems. Clang's implicit -lc++ will resolve to the sanitizer directory, and
@@ -94,14 +113,16 @@ if $sanitized_cxx; then
     link_args=("${filtered_args[@]}")
 fi
 
-# An explicit split-library option is also a runtime-selection request. On
-# glibc before 2.34, putting that library before libc preserves the requested
-# library selection even when libc exports the same symbols.
+# glibc has symbols overlapping in libc and, say, libpthread or libm, and these
+# have different definitions in each. Consequently, we must honour requests to
+# explicitly link the split libraries.
 pthread_driver_flag=false
 pthread_library_flag=false
 math_library_flag=false
+link_cxx_sanitizer_runtime=false
 default_libraries=true
 dynamic_output=true
+shared_output=false
 previous_was_l=false
 link_options=(
     "${MUSL_CLANG_COMPILE_FLAGS[@]}"
@@ -130,8 +151,17 @@ for arg in "${link_options[@]}"; do
         -lm)
             math_library_flag=true
             ;;
+        -fsanitize-link-c++-runtime)
+            link_cxx_sanitizer_runtime=true
+            ;;
+        -fno-sanitize-link-c++-runtime)
+            link_cxx_sanitizer_runtime=false
+            ;;
         -nostdlib|-nodefaultlibs)
             default_libraries=false
+            ;;
+        -shared)
+            shared_output=true
             ;;
         -static|-static-pie|-r|-Wl,-r|-Wl,-r,*|-Wl,--relocatable|\
         -Wl,--relocatable,*)
@@ -216,11 +246,33 @@ if $cxx && ! $sanitized_cxx; then
     cxx_runtime_flags=(-static-libstdc++)
 fi
 
+# A C executable can request the C++ sanitizer archives (it may load C++ DSOs).
+# They need the matching shared C++ ABI, which the C driver does not add.
+# However, -fsanitize-link-c++-runtime is effectively a no-op when -shared is
+# passed (libclang_rt.asan_cxx.a and libclang_rt.ubsan_standalone_cxx.a are not
+# linked into the DSO, so we don't need to link libc++abi either)
+c_sanitizer_abi_flags=()
+if ! $cxx &&
+   [[ -n $sanitizer_root ]] &&
+   $link_cxx_sanitizer_runtime &&
+   $default_libraries &&
+   $dynamic_output &&
+   ! $shared_output; then
+    c_sanitizer_abi_flags=(
+        -Wl,--push-state
+        -Wl,-Bdynamic
+        -lc++abi
+        -Wl,--pop-state
+    )
+fi
+
 # Start user-specified libraries in static mode, while allowing an explicit
 # -Bdynamic from the caller to override that preference. Pop the state before
 # Clang emits its implicit compiler runtimes and dynamic libc.
 exec "$driver" \
     "${common_flags[@]}" \
+    "${cxx_header_flags[@]}" \
+    "${cxx_link_flags[@]}" \
     "${MUSL_CLANG_COMPILE_FLAGS[@]}" \
     "${runtime_selection_flags[@]}" \
     -Wl,--gc-sections \
@@ -231,6 +283,7 @@ exec "$driver" \
     -Wl,-Bstatic \
     "${link_args[@]}" \
     -Wl,--pop-state \
+    "${c_sanitizer_abi_flags[@]}" \
     "${MUSL_CLANG_LINK_FLAGS[@]}" \
     "${pthread_link_flags[@]}" \
     "${math_link_flags[@]}"
