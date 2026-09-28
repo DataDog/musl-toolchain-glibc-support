@@ -280,6 +280,7 @@ COPY --from=builder /usr/include/locale.h /usr/include/locale.h
 COPY --from=builder /opt/compat/libglibc_compat.a /usr/lib/libglibc_compat.a
 COPY --from=builder /opt/compat/glibc_compat_exe.o /usr/lib/glibc_compat_exe.o
 COPY --from=builder /llvm-project-${LLVM_VERSION}.src /llvm-project-${LLVM_VERSION}.src
+COPY LICENSE-3rdparty.csv /licenses/
 
 COPY Toolchain.cmake /usr/local/share/musl/Toolchain.cmake
 COPY glibc-*-symbols*.txt /usr/local/share/musl/

@@ -103,5 +103,8 @@ Do not report security vulnerabilities in a public issue. Follow Datadog's
 ## License
 
 This project is licensed under Apache License 2.0 with LLVM Exceptions. See
-[LICENSE](LICENSE). Third-party software is listed in
-[LICENSE-3rdparty.csv](LICENSE-3rdparty.csv).
+[LICENSE](LICENSE). Development-only third-party software is listed in
+[LICENSE-3rdparty.csv](LICENSE-3rdparty.csv). Third-party software distributed
+in the published images is listed in
+[musl-build-env/LICENSE-3rdparty.csv](musl-build-env/LICENSE-3rdparty.csv),
+which is included in the images under `/licenses`.
