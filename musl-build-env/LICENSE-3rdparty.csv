@@ -1,0 +1,10 @@
+Component,Origin,License,Copyright
+image: LLVM source,https://github.com/llvm/llvm-project,Apache-2.0 WITH LLVM-exception,LLVM Project contributors
+image: LLVM BLAKE3,https://github.com/BLAKE3-team/BLAKE3,CC0-1.0 OR Apache-2.0,BLAKE3 contributors
+image: LLVM Code of Conduct documents,https://github.com/llvm/llvm-project,CC-BY-3.0,LLVM Project contributors
+image: LLVM Google Benchmark,https://github.com/google/benchmark,Apache-2.0,Google Inc. and contributors
+image: LLVM GoogleTest and GoogleMock,https://github.com/google/googletest,BSD-3-Clause,"Copyright 2008, Google Inc."
+image: LLVM imath,https://github.com/creachadair/imath,MIT,Copyright 2002-2009 Michael J. Fromberger
+image: LLVM Intel ITT Notify,https://github.com/intel/ittapi,BSD-3-Clause,Copyright 2019 Intel Corporation
+image: LLVM isl,https://libisl.sourceforge.io/,MIT,isl contributors
+image: PHP SDK files,https://github.com/php/php-src,PHP-3.01,The PHP Group and PHP contributors
