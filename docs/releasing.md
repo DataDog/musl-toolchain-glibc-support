@@ -35,7 +35,8 @@ The tag pipeline:
 4. checks Docker Hub for a conflicting version tag in each image's separate
    publication job;
 5. publishes `musl-build-env` to the logical `public` registry group and
-   `php-buildonly` only to the logical `dockerhub` registry in parallel; and
+   `php-buildonly` to the logical `dev` registry group (Docker Hub and
+   `registry.datadoghq.com`) in parallel; and
 6. after both version publication jobs succeed, independently retags each
    public version as `latest` in its respective registry set.
 
