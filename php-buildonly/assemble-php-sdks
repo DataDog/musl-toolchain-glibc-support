@@ -86,7 +86,7 @@ make_variant()
                 "${php_config_h}"
 
             case "${version}" in
-                8.3|8.4|8.5)
+                8.3|8.4|8.5|8.6)
                     sed -i "${max_timer_edit}" "${php_config_h}"
                     ;;
             esac
@@ -101,7 +101,7 @@ make_variant()
             if ! grep -q '^libs=.*-lpthread' \
                 "${prefix}/bin/php-config"; then
                 case "${version}" in
-                    8.4|8.5)
+                    8.4|8.5|8.6)
                         sed -i \
                             's/^libs="\([^"]*\)"$/libs="\1 -lpthread"/' \
                             "${prefix}/bin/php-config"
@@ -122,7 +122,7 @@ make_variant()
 
 for spec in \
     7.0:70 7.1:71 7.2:72 7.3:73 7.4:74 \
-    8.0:80 8.1:81 8.2:82 8.3:83 8.4:84 8.5:85
+    8.0:80 8.1:81 8.2:82 8.3:83 8.4:84 8.5:85 8.6:86
 do
     version="${spec%%:*}"
     key="${spec#*:}"
@@ -134,7 +134,8 @@ do
         "${release_prefix}/bin" \
         "${release_prefix}/lib/php"
 
-    # Each SDK is sourced entirely from its matching official PHP image.
+    # Each SDK is sourced entirely from its matching official PHP image, or
+    # for 8.6 from the NTS source build stage.
     cp -a "${official}/include/php" "${release_prefix}/include/php"
     cp -p \
         "${official}/bin/phpize" \
@@ -145,8 +146,12 @@ do
         "${release_prefix}/lib/php/build"
 
     # Keep Clang's static runtime archives when phpize derives linker flags.
-    patch -d "${release_prefix}/lib/php" -p1 \
-        < /tmp/libtool-clang-rt-static-archives.patch
+    # PHP 8.6 bundles libtool 2.5.
+    case "${version}" in
+        8.6) libtool_patch=/tmp/libtool-2.5-clang-rt-static-archives.patch ;;
+        *) libtool_patch=/tmp/libtool-clang-rt-static-archives.patch ;;
+    esac
+    patch -d "${release_prefix}/lib/php" -p1 < "${libtool_patch}"
 
     # Avoid a false UBSan null-member diagnostic in PHP 7.0 headers.
     if [ "${version}" = "7.0" ]; then

@@ -16,7 +16,7 @@ This repository publishes two images:
 
 - `datadog/musl-build-env`, the base musl toolchain; and
 - `datadog/php-buildonly`, a derived image containing build-only PHP SDKs for
-  PHP 7.0 through 8.5.
+  PHP 7.0 through 8.6.
 
 Both images support:
 

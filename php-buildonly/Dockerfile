@@ -3,6 +3,12 @@
 ARG BUILD_ENV_IMAGE=musl-build-env:latest
 ARG IMAGE_MIRROR=docker.io/library
 
+# Official PHP 8.6+ images are always ZTS, so the NTS 8.6 SDK is built from
+# source. GA releases are under https://www.php.net/distributions/.
+ARG PHP86_VERSION=8.6.0RC2
+ARG PHP86_URL=https://downloads.php.net/~mbeccati/php-${PHP86_VERSION}.tar.xz
+ARG PHP86_SHA256=ef3fba21c311e9bbace0e2102702446d322c275b8a10e6b33b28f2561299671c
+
 FROM ${IMAGE_MIRROR}/php:7.0-cli-alpine AS php70
 FROM ${IMAGE_MIRROR}/php:7.1-cli-alpine AS php71
 FROM ${IMAGE_MIRROR}/php:7.2-cli-alpine AS php72
@@ -14,6 +20,61 @@ FROM ${IMAGE_MIRROR}/php:8.2-cli-alpine AS php82
 FROM ${IMAGE_MIRROR}/php:8.3-cli-alpine AS php83
 FROM ${IMAGE_MIRROR}/php:8.4-cli-alpine AS php84
 FROM ${IMAGE_MIRROR}/php:8.5-cli-alpine AS php85
+
+# Mirror the official php:8.6-rc-cli-alpine build, minus --enable-zts and
+# --disable-zend-signals.
+FROM ${IMAGE_MIRROR}/alpine:3.23 AS php86
+ARG PHP86_VERSION
+ARG PHP86_URL
+ARG PHP86_SHA256
+# configure also reads PHP_LDFLAGS, which ends up in php-config --ldflags.
+ENV PHP_CFLAGS="-fstack-protector-strong -fpic -fpie -O2 -D_LARGEFILE_SOURCE -D_FILE_OFFSET_BITS=64"
+ENV PHP_CPPFLAGS="$PHP_CFLAGS"
+ENV PHP_LDFLAGS="-Wl,-O1 -pie"
+RUN set -eux; \
+    apk add --no-cache --virtual .build-deps \
+        autoconf dpkg-dev dpkg file g++ gcc libc-dev make pkgconf re2c \
+        argon2-dev coreutils curl curl-dev gnu-libiconv-dev libsodium-dev \
+        libxml2-dev linux-headers openssl-dev readline-dev sqlite-dev \
+        tar xz; \
+    rm -vf /usr/include/iconv.h; \
+    mkdir -p /usr/src/php; \
+    cd /usr/src; \
+    curl -fsSL -o php.tar.xz "${PHP86_URL}"; \
+    echo "${PHP86_SHA256} *php.tar.xz" | sha256sum -c -; \
+    tar -xJf php.tar.xz -C php --strip-components=1; \
+    cd php; \
+    export \
+        CFLAGS="${PHP_CFLAGS}" \
+        CPPFLAGS="${PHP_CPPFLAGS}" \
+        LDFLAGS="${PHP_LDFLAGS}" \
+        PHP_BUILD_PROVIDER='https://github.com/docker-library/php' \
+        PHP_UNAME='Linux - Docker'; \
+    ./configure \
+        --build="$(dpkg-architecture --query DEB_BUILD_GNU_TYPE)" \
+        --sysconfdir=/usr/local/etc \
+        --with-config-file-path=/usr/local/etc/php \
+        --with-config-file-scan-dir=/usr/local/etc/php/conf.d \
+        --enable-option-checking=fatal \
+        --with-mhash \
+        --enable-pic \
+        --enable-mysqlnd \
+        --with-password-argon2 \
+        --with-sodium=shared \
+        --with-pdo-sqlite=/usr \
+        --with-sqlite3=/usr \
+        --with-curl \
+        --with-iconv=/usr \
+        --with-openssl \
+        --with-readline \
+        --with-zlib \
+        --enable-phpdbg \
+        --enable-phpdbg-readline \
+        --enable-embed; \
+    make -j "$(nproc)"; \
+    make install; \
+    test "$(/usr/local/bin/php -r 'echo PHP_VERSION;')" = "${PHP86_VERSION}"; \
+    test "$(/usr/local/bin/php -r 'echo (int) PHP_ZTS;')" = 0
 
 FROM ${BUILD_ENV_IMAGE}
 
@@ -41,6 +102,7 @@ RUN clang \
 # Hard links cannot portably refer to files in a previous OCI layer.
 RUN --mount=type=bind,source=assemble-php-sdks,target=/tmp/assemble-php-sdks,ro \
     --mount=type=bind,source=libtool-clang-rt-static-archives.patch,target=/tmp/libtool-clang-rt-static-archives.patch,ro \
+    --mount=type=bind,source=libtool-2.5-clang-rt-static-archives.patch,target=/tmp/libtool-2.5-clang-rt-static-archives.patch,ro \
     --mount=type=bind,source=php-7.0-builtin-offsetof.patch,target=/tmp/php-7.0-builtin-offsetof.patch,ro \
     --mount=from=php70,source=/usr/local,target=/mnt/php70,ro \
     --mount=from=php71,source=/usr/local,target=/mnt/php71,ro \
@@ -53,6 +115,7 @@ RUN --mount=type=bind,source=assemble-php-sdks,target=/tmp/assemble-php-sdks,ro 
     --mount=from=php83,source=/usr/local,target=/mnt/php83,ro \
     --mount=from=php84,source=/usr/local,target=/mnt/php84,ro \
     --mount=from=php85,source=/usr/local,target=/mnt/php85,ro \
+    --mount=from=php86,source=/usr/local,target=/mnt/php86,ro \
     sh /tmp/assemble-php-sdks
 
 COPY phpize php-config /usr/local/bin/
@@ -69,7 +132,7 @@ RUN set -eux; \
     chmod +x /usr/local/bin/phpize /usr/local/bin/php-config; \
     for version in \
         7.0 7.1 7.2 7.3 7.4 \
-        8.0 8.1 8.2 8.3 8.4 8.5; \
+        8.0 8.1 8.2 8.3 8.4 8.5 8.6; \
     do \
         release_prefix="/opt/php/${version}"; \
         release_inode=$(stat -c %i \
