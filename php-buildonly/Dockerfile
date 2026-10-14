@@ -5,9 +5,9 @@ ARG IMAGE_MIRROR=docker.io/library
 
 # Official PHP 8.6+ images are always ZTS, so the NTS 8.6 SDK is built from
 # source. GA releases are under https://www.php.net/distributions/.
-ARG PHP86_VERSION=8.6.0RC2
-ARG PHP86_URL=https://downloads.php.net/~mbeccati/php-${PHP86_VERSION}.tar.xz
-ARG PHP86_SHA256=ef3fba21c311e9bbace0e2102702446d322c275b8a10e6b33b28f2561299671c
+ARG PHP86_VERSION=8.6.0RC3
+ARG PHP86_URL=https://downloads.php.net/~svpernova09/php-${PHP86_VERSION}.tar.xz
+ARG PHP86_SHA256=131f87a206bdd90c178d8e44e80243ae0c333c4cee8531f63d1caa9acdd8696a
 
 FROM ${IMAGE_MIRROR}/php:7.0-cli-alpine AS php70
 FROM ${IMAGE_MIRROR}/php:7.1-cli-alpine AS php71
