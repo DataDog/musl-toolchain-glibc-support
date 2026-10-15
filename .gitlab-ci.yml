@@ -551,7 +551,7 @@ publish-php-buildonly:
       check_public_version \
         php-buildonly "${PHP_BUILDONLY_RELEASE_DIGEST}"
       publish_version \
-        dockerhub "${PHP_BUILDONLY_RELEASE_SOURCE}" php-buildonly
+        dev "${PHP_BUILDONLY_RELEASE_SOURCE}" php-buildonly
 
 .publish-latest-job:
   extends: .publish-job
@@ -592,4 +592,4 @@ update-php-buildonly-latest:
   resource_group: php-buildonly-publication
   script:
     - |
-      publish_latest dockerhub php-buildonly
+      publish_latest dev php-buildonly
