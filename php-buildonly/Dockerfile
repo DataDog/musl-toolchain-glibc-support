@@ -3,18 +3,19 @@
 ARG BUILD_ENV_IMAGE=musl-build-env:latest
 ARG IMAGE_MIRROR=docker.io/library
 
-FROM ${IMAGE_MIRROR}/php:7.0-cli-alpine AS php70
-FROM ${IMAGE_MIRROR}/php:7.1-cli-alpine AS php71
-FROM ${IMAGE_MIRROR}/php:7.2-cli-alpine AS php72
-FROM ${IMAGE_MIRROR}/php:7.3-cli-alpine AS php73
-FROM ${IMAGE_MIRROR}/php:7.4-cli-alpine AS php74
-FROM ${IMAGE_MIRROR}/php:8.0-cli-alpine AS php80
-FROM ${IMAGE_MIRROR}/php:8.1-cli-alpine AS php81
-FROM ${IMAGE_MIRROR}/php:8.2-cli-alpine AS php82
-FROM ${IMAGE_MIRROR}/php:8.3-cli-alpine AS php83
-FROM ${IMAGE_MIRROR}/php:8.4-cli-alpine AS php84
-FROM ${IMAGE_MIRROR}/php:8.5-cli-alpine AS php85
-# Official 8.6+ images are ZTS only; assemble-php-sdks derives the NTS SDK.
+# Official ZTS images; assemble-php-sdks derives the NTS and debug SDKs.
+FROM ${IMAGE_MIRROR}/php:7.0-zts-alpine AS php70
+FROM ${IMAGE_MIRROR}/php:7.1-zts-alpine AS php71
+FROM ${IMAGE_MIRROR}/php:7.2-zts-alpine AS php72
+FROM ${IMAGE_MIRROR}/php:7.3-zts-alpine AS php73
+FROM ${IMAGE_MIRROR}/php:7.4-zts-alpine AS php74
+FROM ${IMAGE_MIRROR}/php:8.0-zts-alpine AS php80
+FROM ${IMAGE_MIRROR}/php:8.1-zts-alpine AS php81
+FROM ${IMAGE_MIRROR}/php:8.2-zts-alpine AS php82
+FROM ${IMAGE_MIRROR}/php:8.3-zts-alpine AS php83
+FROM ${IMAGE_MIRROR}/php:8.4-zts-alpine AS php84
+FROM ${IMAGE_MIRROR}/php:8.5-zts-alpine AS php85
+# PHP 8.6+ images have no zts variant: their cli variant is ZTS.
 FROM ${IMAGE_MIRROR}/php:8.6-rc-cli-alpine AS php86
 
 FROM ${BUILD_ENV_IMAGE}
