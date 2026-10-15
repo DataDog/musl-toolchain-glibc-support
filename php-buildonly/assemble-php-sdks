@@ -35,6 +35,36 @@ rewrite_zts_metadata()
         "${file}"
 }
 
+# Official PHP 8.6+ images are ZTS only. Derive the NTS release SDK from them
+# by undoing the edits the release-zts variant applies below.
+make_nts_from_zts()
+{
+    prefix="$1"
+    php_config_h="${prefix}/include/php/main/php_config.h"
+    build_defs_h="${prefix}/include/php/main/build-defs.h"
+    php_config="${prefix}/bin/php-config"
+
+    grep -qx '/\* #undef ZEND_SIGNALS \*/' "${php_config_h}"
+    grep -qx '#define ZEND_MAX_EXECUTION_TIMERS 1' "${php_config_h}"
+    sed -i \
+        -e 's@^#define ZTS 1$@/* #undef ZTS */@' \
+        -e 's@^/\* #undef ZEND_SIGNALS \*/$@#define ZEND_SIGNALS 1@' \
+        -e 's@^#define ZEND_MAX_EXECUTION_TIMERS 1$@/* #undef ZEND_MAX_EXECUTION_TIMERS */@' \
+        "${php_config_h}"
+    sed -i \
+        -e "/^#define CONFIGURE_COMMAND / s@ '--enable-zts' '--disable-zend-signals'@@" \
+        -e "/^configure_options=/ s@ '--enable-zts' '--disable-zend-signals'@@" \
+        -e 's@/no-debug-zts-@/no-debug-non-zts-@g' \
+        "${build_defs_h}" "${php_config}"
+    sed -i '/^libs=/ s@ -lpthread@@' "${php_config}"
+    # "! grep" would not stop "set -e".
+    if grep -q -e "'--enable-zts'" -e 'no-debug-zts-' \
+        "${build_defs_h}" "${php_config}"; then
+        echo "failed to derive NTS metadata in ${prefix}" >&2
+        exit 1
+    fi
+}
+
 make_variant()
 {
     version="$1"
@@ -134,8 +164,7 @@ do
         "${release_prefix}/bin" \
         "${release_prefix}/lib/php"
 
-    # Each SDK is sourced entirely from its matching official PHP image, or
-    # for 8.6 from the NTS source build stage.
+    # Each SDK is sourced entirely from its matching official PHP image.
     cp -a "${official}/include/php" "${release_prefix}/include/php"
     cp -p \
         "${official}/bin/phpize" \
@@ -144,6 +173,13 @@ do
     cp -a \
         "${official}/lib/php/build" \
         "${release_prefix}/lib/php/build"
+
+    official_zts=
+    if grep -qx '#define ZTS 1' \
+        "${official}/include/php/main/php_config.h"; then
+        official_zts=1
+        make_nts_from_zts "${release_prefix}"
+    fi
 
     # Keep Clang's static runtime archives when phpize derives linker flags.
     # PHP 8.6 bundles libtool 2.5.
@@ -165,4 +201,9 @@ do
 
     make_variant "${version}" debug
     make_variant "${version}" release-zts
+    # The ZTS header derived back from NTS must match the official one.
+    if [ -n "${official_zts}" ]; then
+        cmp "${official}/include/php/main/php_config.h" \
+            "${sdk_root}/${version}-release-zts/include/php/main/php_config.h"
+    fi
 done
