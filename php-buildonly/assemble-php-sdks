@@ -3,7 +3,6 @@ set -eu
 
 sdk_root="${PHP_SDK_ROOT:-/opt/php}"
 debug_stack_edit='s@^#define ZEND_CHECK_STACK_LIMIT 1$@/* #undef ZEND_CHECK_STACK_LIMIT */@'
-max_timer_edit='s@^/\* #undef ZEND_MAX_EXECUTION_TIMERS \*/$@#define ZEND_MAX_EXECUTION_TIMERS 1@'
 
 break_link()
 {
@@ -23,16 +22,53 @@ rewrite_debug_metadata()
         "${file}"
 }
 
-rewrite_zts_metadata()
+# The official images are ZTS builds. Derive the NTS release SDK by undoing
+# their ZTS options. Each edit is a no-op for versions that lack its line.
+make_nts()
 {
-    file="$1"
-    zts_option="$2"
+    prefix="$1"
+    zts_php_config_h="$2"
+    php_config_h="${prefix}/include/php/main/php_config.h"
+    build_defs_h="${prefix}/include/php/main/build-defs.h"
+    php_config="${prefix}/bin/php-config"
+
+    # Zend signals are on by default since PHP 7.1. Restore them only where
+    # the ZTS build disabled them explicitly.
+    nts_signals_edit=
+    zts_signals_edit=
+    if grep -q "'--disable-zend-signals'" "${build_defs_h}"; then
+        nts_signals_edit='s@^/\* #undef ZEND_SIGNALS \*/$@#define ZEND_SIGNALS 1@'
+        zts_signals_edit='s@^#define ZEND_SIGNALS 1$@/* #undef ZEND_SIGNALS */@'
+    fi
+    sed -i \
+        -e 's@^#define ZTS 1$@/* #undef ZTS */@' \
+        -e 's@^#define PTHREADS 1$@/* #undef PTHREADS */@' \
+        -e 's@^#define ZEND_MAX_EXECUTION_TIMERS 1$@/* #undef ZEND_MAX_EXECUTION_TIMERS */@' \
+        -e "${nts_signals_edit}" \
+        "${php_config_h}"
+    # Redoing the edits must give back the official header.
+    sed \
+        -e 's@^/\* #undef ZTS \*/$@#define ZTS 1@' \
+        -e 's@^/\* #undef PTHREADS \*/$@#define PTHREADS 1@' \
+        -e 's@^/\* #undef ZEND_MAX_EXECUTION_TIMERS \*/$@#define ZEND_MAX_EXECUTION_TIMERS 1@' \
+        -e "${zts_signals_edit}" \
+        "${php_config_h}" | cmp - "${zts_php_config_h}"
 
     sed -i \
-        -e "/^#define CONFIGURE_COMMAND / s@\"\$@ '${zts_option}' '--disable-zend-signals'\"@" \
-        -e "/^configure_options=/ s@\"\$@ '${zts_option}' '--disable-zend-signals'\"@" \
-        -e 's@/no-debug-non-zts-@/no-debug-zts-@g' \
-        "${file}"
+        -e "s@ '--enable-zts'@@" \
+        -e "s@ '--enable-maintainer-zts'@@" \
+        -e "s@ '--disable-zend-signals'@@" \
+        -e "s@ '--enable-zend-max-execution-timers'@@" \
+        -e 's@/no-debug-zts-@/no-debug-non-zts-@g' \
+        "${build_defs_h}" "${php_config}"
+    # ZTS adds the pthread library ahead of the extension libraries.
+    sed -i '/^libs=/ s@ -lpthread@@' "${php_config}"
+    # "! grep" would not stop "set -e".
+    if grep -q -e "'--enable-zts'" -e "'--enable-maintainer-zts'" \
+        -e 'no-debug-zts-' "${build_defs_h}" "${php_config}"; then
+        echo "failed to derive NTS metadata in ${prefix}" >&2
+        exit 1
+    fi
 }
 
 make_variant()
@@ -79,39 +115,7 @@ make_variant()
             rewrite_debug_metadata "${prefix}/bin/php-config"
             ;;
         release-zts)
-            sed -i \
-                -e 's@^/\* #undef ZTS \*/$@#define ZTS 1@' \
-                -e 's@^/\* #undef PTHREADS \*/$@#define PTHREADS 1@' \
-                -e 's@^#define ZEND_SIGNALS 1$@/* #undef ZEND_SIGNALS */@' \
-                "${php_config_h}"
-
-            case "${version}" in
-                8.3|8.4|8.5)
-                    sed -i "${max_timer_edit}" "${php_config_h}"
-                    ;;
-            esac
-
-            case "${version}" in
-                7.*) zts_option="--enable-maintainer-zts" ;;
-                8.*) zts_option="--enable-zts" ;;
-            esac
-            rewrite_zts_metadata "${build_defs_h}" "${zts_option}"
-            rewrite_zts_metadata \
-                "${prefix}/bin/php-config" "${zts_option}"
-            if ! grep -q '^libs=.*-lpthread' \
-                "${prefix}/bin/php-config"; then
-                case "${version}" in
-                    8.4|8.5)
-                        sed -i \
-                            's/^libs="\([^"]*\)"$/libs="\1 -lpthread"/' \
-                            "${prefix}/bin/php-config"
-                        ;;
-                    *)
-                        sed -i '/^libs=/ s/"$/-lpthread "/' \
-                            "${prefix}/bin/php-config"
-                        ;;
-                esac
-            fi
+            # Made before make_nts runs, so it keeps the official ZTS files.
             ;;
         *)
             echo "unknown PHP SDK variant: ${variant}" >&2
@@ -122,7 +126,7 @@ make_variant()
 
 for spec in \
     7.0:70 7.1:71 7.2:72 7.3:73 7.4:74 \
-    8.0:80 8.1:81 8.2:82 8.3:83 8.4:84 8.5:85
+    8.0:80 8.1:81 8.2:82 8.3:83 8.4:84 8.5:85 8.6:86
 do
     version="${spec%%:*}"
     key="${spec#*:}"
@@ -134,7 +138,7 @@ do
         "${release_prefix}/bin" \
         "${release_prefix}/lib/php"
 
-    # Each SDK is sourced entirely from its matching official PHP image.
+    # Each SDK is sourced from its matching official ZTS PHP image.
     cp -a "${official}/include/php" "${release_prefix}/include/php"
     cp -p \
         "${official}/bin/phpize" \
@@ -145,8 +149,12 @@ do
         "${release_prefix}/lib/php/build"
 
     # Keep Clang's static runtime archives when phpize derives linker flags.
-    patch -d "${release_prefix}/lib/php" -p1 \
-        < /tmp/libtool-clang-rt-static-archives.patch
+    # PHP 8.6 bundles libtool 2.5.
+    case "${version}" in
+        8.6) libtool_patch=/tmp/libtool-2.5-clang-rt-static-archives.patch ;;
+        *) libtool_patch=/tmp/libtool-clang-rt-static-archives.patch ;;
+    esac
+    patch -d "${release_prefix}/lib/php" -p1 < "${libtool_patch}"
 
     # Avoid a false UBSan null-member diagnostic in PHP 7.0 headers.
     if [ "${version}" = "7.0" ]; then
@@ -158,6 +166,7 @@ do
         "${release_prefix}/bin/phpize" \
         "${release_prefix}/bin/php-config"
 
-    make_variant "${version}" debug
     make_variant "${version}" release-zts
+    make_nts "${release_prefix}" "${official}/include/php/main/php_config.h"
+    make_variant "${version}" debug
 done
