@@ -3,17 +3,20 @@
 ARG BUILD_ENV_IMAGE=musl-build-env:latest
 ARG IMAGE_MIRROR=docker.io/library
 
-FROM ${IMAGE_MIRROR}/php:7.0-cli-alpine AS php70
-FROM ${IMAGE_MIRROR}/php:7.1-cli-alpine AS php71
-FROM ${IMAGE_MIRROR}/php:7.2-cli-alpine AS php72
-FROM ${IMAGE_MIRROR}/php:7.3-cli-alpine AS php73
-FROM ${IMAGE_MIRROR}/php:7.4-cli-alpine AS php74
-FROM ${IMAGE_MIRROR}/php:8.0-cli-alpine AS php80
-FROM ${IMAGE_MIRROR}/php:8.1-cli-alpine AS php81
-FROM ${IMAGE_MIRROR}/php:8.2-cli-alpine AS php82
-FROM ${IMAGE_MIRROR}/php:8.3-cli-alpine AS php83
-FROM ${IMAGE_MIRROR}/php:8.4-cli-alpine AS php84
-FROM ${IMAGE_MIRROR}/php:8.5-cli-alpine AS php85
+# Official ZTS images; assemble-php-sdks derives the NTS and debug SDKs.
+FROM ${IMAGE_MIRROR}/php:7.0-zts-alpine AS php70
+FROM ${IMAGE_MIRROR}/php:7.1-zts-alpine AS php71
+FROM ${IMAGE_MIRROR}/php:7.2-zts-alpine AS php72
+FROM ${IMAGE_MIRROR}/php:7.3-zts-alpine AS php73
+FROM ${IMAGE_MIRROR}/php:7.4-zts-alpine AS php74
+FROM ${IMAGE_MIRROR}/php:8.0-zts-alpine AS php80
+FROM ${IMAGE_MIRROR}/php:8.1-zts-alpine AS php81
+FROM ${IMAGE_MIRROR}/php:8.2-zts-alpine AS php82
+FROM ${IMAGE_MIRROR}/php:8.3-zts-alpine AS php83
+FROM ${IMAGE_MIRROR}/php:8.4-zts-alpine AS php84
+FROM ${IMAGE_MIRROR}/php:8.5-zts-alpine AS php85
+# PHP 8.6+ images have no zts variant: their cli variant is ZTS.
+FROM ${IMAGE_MIRROR}/php:8.6-rc-cli-alpine AS php86
 
 FROM ${BUILD_ENV_IMAGE}
 
@@ -41,6 +44,7 @@ RUN clang \
 # Hard links cannot portably refer to files in a previous OCI layer.
 RUN --mount=type=bind,source=assemble-php-sdks,target=/tmp/assemble-php-sdks,ro \
     --mount=type=bind,source=libtool-clang-rt-static-archives.patch,target=/tmp/libtool-clang-rt-static-archives.patch,ro \
+    --mount=type=bind,source=libtool-2.5-clang-rt-static-archives.patch,target=/tmp/libtool-2.5-clang-rt-static-archives.patch,ro \
     --mount=type=bind,source=php-7.0-builtin-offsetof.patch,target=/tmp/php-7.0-builtin-offsetof.patch,ro \
     --mount=from=php70,source=/usr/local,target=/mnt/php70,ro \
     --mount=from=php71,source=/usr/local,target=/mnt/php71,ro \
@@ -53,6 +57,7 @@ RUN --mount=type=bind,source=assemble-php-sdks,target=/tmp/assemble-php-sdks,ro 
     --mount=from=php83,source=/usr/local,target=/mnt/php83,ro \
     --mount=from=php84,source=/usr/local,target=/mnt/php84,ro \
     --mount=from=php85,source=/usr/local,target=/mnt/php85,ro \
+    --mount=from=php86,source=/usr/local,target=/mnt/php86,ro \
     sh /tmp/assemble-php-sdks
 
 COPY phpize php-config /usr/local/bin/
@@ -69,7 +74,7 @@ RUN set -eux; \
     chmod +x /usr/local/bin/phpize /usr/local/bin/php-config; \
     for version in \
         7.0 7.1 7.2 7.3 7.4 \
-        8.0 8.1 8.2 8.3 8.4 8.5; \
+        8.0 8.1 8.2 8.3 8.4 8.5 8.6; \
     do \
         release_prefix="/opt/php/${version}"; \
         release_inode=$(stat -c %i \
@@ -78,7 +83,7 @@ RUN set -eux; \
             "${release_prefix}/include/php/main/php_config.h"); \
         grep -qx '#define ZEND_DEBUG 0' \
             "${release_prefix}/include/php/main/php_config.h"; \
-        ! grep -qx '#define ZTS 1' \
+        grep -qx '/\* #undef ZTS \*/' \
             "${release_prefix}/include/php/main/php_config.h"; \
         "${release_prefix}/bin/phpize" --version; \
         test "$("${release_prefix}/bin/php-config" --include-dir)" = \
@@ -94,7 +99,7 @@ RUN set -eux; \
                 debug) \
                     grep -qx '#define ZEND_DEBUG 1' \
                         "${prefix}/include/php/main/php_config.h"; \
-                    ! grep -qx '#define ZTS 1' \
+                    grep -qx '/\* #undef ZTS \*/' \
                         "${prefix}/include/php/main/php_config.h"; \
                     ;; \
                 release-zts) \
