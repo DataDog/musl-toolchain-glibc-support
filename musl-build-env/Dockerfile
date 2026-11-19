@@ -59,16 +59,18 @@ RUN cd / && \
 #   - msghdr:   account for musl's narrower msg_iovlen/msg_controllen fields.
 #   - rlimit64: define sizes for musl's non-distinct *64 resource structures.
 #   - stat:     intercept musl's public stat-family APIs.
+#   - strerror_r: use the POSIX interceptor, matching musl's signature.
 COPY compiler-rt-musl-tls.diff compiler-rt-musl-msghdr.diff \
-     compiler-rt-musl-rlimit64.diff compiler-rt-musl-stat.diff /build-input/
+     compiler-rt-musl-rlimit64.diff compiler-rt-musl-stat.diff \
+     compiler-rt-musl-strerror_r.diff /build-input/
 RUN set -eux; \
     case "${OMIT_COMPILER_RT_PATCH}" in \
-        ""|tls|msghdr|rlimit64|stat) ;; \
+        ""|tls|msghdr|rlimit64|stat|strerror_r) ;; \
         *) echo "Unknown compiler-rt patch: ${OMIT_COMPILER_RT_PATCH}" >&2; \
            exit 1 ;; \
     esac; \
     cd "/llvm-project-${LLVM_VERSION}.src"; \
-    for patch_name in tls msghdr rlimit64 stat; do \
+    for patch_name in tls msghdr rlimit64 stat strerror_r; do \
         if [ "${OMIT_COMPILER_RT_PATCH}" != "${patch_name}" ]; then \
             patch -p1 < "/build-input/compiler-rt-musl-${patch_name}.diff"; \
         fi; \
