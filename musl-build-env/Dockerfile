@@ -15,16 +15,19 @@ ARG OMIT_COMPILER_RT_PATCH=
 
 FROM ${IMAGE_MIRROR}/library/alpine:${ALPINE_VERSION} AS toolchain-base
 
-# Pin the build and final stages to the same musl revision so their libc,
-# development headers, and generated runtime artifacts stay reproducible.
-ARG MUSL_VERSION=1.2.5-r23
+# Constrain musl to the upstream release that the header patches, FILE layout
+# assumptions, and symbol lists were written against. Any Alpine revision of
+# it is accepted: the stable branch drops superseded revisions, so an exact
+# pin stops building. The builder and final stages both derive from this
+# stage, so they share the same musl revision by construction.
+ARG MUSL_VERSION=1.2.5
 RUN apk --no-cache add \
-        "musl=${MUSL_VERSION}" "musl-dev=${MUSL_VERSION}" \
+        "musl~${MUSL_VERSION}" "musl-dev~${MUSL_VERSION}" \
         alpine-sdk bash binutils clang cmake compiler-rt \
         coreutils git linux-headers lld llvm make openssl-dev \
         patchelf pcre-dev pcre2-dev perl python3 wget xz zlib-dev && \
-    apk info -e "musl=${MUSL_VERSION}" && \
-    apk info -e "musl-dev=${MUSL_VERSION}"
+    apk info -e "musl~${MUSL_VERSION}" && \
+    apk info -e "musl-dev~${MUSL_VERSION}"
 
 # Clang searches its own program directory before /usr/bin. Supplying ld there
 # makes LLD the Clang default without changing GCC's /usr/bin/ld.
@@ -59,16 +62,18 @@ RUN cd / && \
 #   - msghdr:   account for musl's narrower msg_iovlen/msg_controllen fields.
 #   - rlimit64: define sizes for musl's non-distinct *64 resource structures.
 #   - stat:     intercept musl's public stat-family APIs.
+#   - strerror_r: use the POSIX interceptor, matching musl's signature.
 COPY compiler-rt-musl-tls.diff compiler-rt-musl-msghdr.diff \
-     compiler-rt-musl-rlimit64.diff compiler-rt-musl-stat.diff /build-input/
+     compiler-rt-musl-rlimit64.diff compiler-rt-musl-stat.diff \
+     compiler-rt-musl-strerror_r.diff /build-input/
 RUN set -eux; \
     case "${OMIT_COMPILER_RT_PATCH}" in \
-        ""|tls|msghdr|rlimit64|stat) ;; \
+        ""|tls|msghdr|rlimit64|stat|strerror_r) ;; \
         *) echo "Unknown compiler-rt patch: ${OMIT_COMPILER_RT_PATCH}" >&2; \
            exit 1 ;; \
     esac; \
     cd "/llvm-project-${LLVM_VERSION}.src"; \
-    for patch_name in tls msghdr rlimit64 stat; do \
+    for patch_name in tls msghdr rlimit64 stat strerror_r; do \
         if [ "${OMIT_COMPILER_RT_PATCH}" != "${patch_name}" ]; then \
             patch -p1 < "/build-input/compiler-rt-musl-${patch_name}.diff"; \
         fi; \
@@ -270,7 +275,6 @@ RUN set -eux; \
 FROM toolchain-base AS final
 
 ARG LLVM_VERSION
-ARG MUSL_VERSION=1.2.5-r23
 
 COPY --from=builder /opt/runtime-root/ /
 COPY --from=builder /opt/asan-root/ /
@@ -330,8 +334,6 @@ RUN set -eux; \
     mkdir -p "${LEGACY_TOOLCHAIN_DIR}"; \
     ln -s /usr/local/share/musl/Toolchain.cmake \
         "${LEGACY_TOOLCHAIN_DIR}/Toolchain.cmake"; \
-    apk info -e "musl=${MUSL_VERSION}"; \
-    apk info -e "musl-dev=${MUSL_VERSION}"; \
     test "$(sha256sum "${MUSL_LOADER}" | awk '{print $1}')" = \
         "${LOADER_CHECKSUM}"; \
     test "$(readelf -d "${MUSL_LOADER}" | sed -n \

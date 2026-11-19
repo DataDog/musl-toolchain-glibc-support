@@ -276,6 +276,7 @@ spec; the second must pass. Supported omission names and their specs are:
 | `tls` | `CompilerRtTlsPatchSpec` |
 | `stat` | `CompilerRtStatPatchSpec` |
 | `rlimit64` | `CompilerRtRlimit64PatchSpec` |
+| `strerror_r` | `CompilerRtStrerrorRPatchSpec` |
 
 Run the omission matrix on both supported CPU architectures. The TLS case must
 also cover Alpine 3.12 and Alpine 3.24 because those releases use different
