@@ -27,8 +27,8 @@ explicit `-lm` similarly forces the libm facade ahead of libc.
 two architectures have the same 268 symbols.
 
 glibc 2.34 integrated libpthread, libdl, libutil, and libanl into libc. The
-legacy lists use Fedora 34's glibc 2.33-21.fc34 DSOs and the musl 1.2.5-r23
-used by this build environment:
+legacy lists use Fedora 34's glibc 2.33-21.fc34 DSOs and the musl 1.2.5
+(Alpine revision 1.2.5-r23) used by this build environment:
 
 - `glibc-2.33-libpthread-symbols-aarch64.txt`: 152 symbols, minus all 46 also
   exported by libc, leaving 106.
